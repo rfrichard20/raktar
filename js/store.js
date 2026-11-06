@@ -144,7 +144,13 @@ async function doSync() {
     await Promise.all([idb.set('snapshot', { data: state.snapshot, at: state.snapshotAt }), persist()]);
   } catch (e) {
     if (e.network) { state.online = false; state.lastError = e.message; }
-    else if (e.auth) { state.authError = e.message; state.lastError = e.message; }
+    else if (e.auth) {
+      // Lejárt / visszavont hozzáférés: a letöltött adatot azonnal töröljük a készülékről,
+      // és újra be kell jelentkezni. A még fel nem töltött rögzítések (outbox) megmaradnak.
+      state.authError = e.message; state.lastError = e.message;
+      state.user = null; state.token = null; state.snapshot = null; state.snapshotAt = null;
+      await Promise.all([idb.del('session'), idb.del('snapshot')]);
+    }
     else { state.lastError = e.message; }
   } finally {
     state.syncing = false;

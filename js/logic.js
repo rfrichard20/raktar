@@ -83,6 +83,10 @@ var RaktarLogic = (function () {
       else out[name] = v == null ? '' : String(v).trim().slice(0, 2000); // hosszkorlát (cella-visszaélés ellen)
     });
     if (table === 'Felhasznalok') out.email = out.email.toLowerCase();
+    // Linkmezők: csak http(s) cím fogadható el (pl. „javascript:” nem)
+    ['link', 'weboldal', 'kereso_url'].forEach(function (f) {
+      if (out[f] && !/^https?:\/\//i.test(out[f])) out[f] = '';
+    });
     return out;
   }
 
