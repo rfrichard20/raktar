@@ -11,6 +11,8 @@ const OP_LABEL = {
   },
   rendeles: op => `Új rendelés – ${op.sorok.length} tétel`,
   rendeles_lezaras: op => `Rendelés lezárása (${op.rendeles_id})`,
+  rendeles_torles: op => `Rendelés törlése (${op.rendeles_id})`,
+  rendeles_adat: op => `Rendelés adatainak módosítása (${op.rendeles_id})`,
   mentes: op => `Mentés: ${op.table}`,
   torles: op => `Törlés: ${op.table}`,
   uj_tetel: op => `Új tétel: ${op.tetel.megnevezes}`,
@@ -27,13 +29,13 @@ export default {
     root.innerHTML = String(html`
       <div class="page-head"><h1>Fiók és szinkron</h1></div>
       <div class="card card-pad">
-        <dl class="kv">
+        <dl class="facts">
           <dt>Név</dt><dd>${s.user.nev}</dd>
           <dt>E-mail</dt><dd>${s.user.email}</dd>
           <dt>Szerepkör</dt><dd>${L.ROLE_LABELS[s.user.szerepkor] || s.user.szerepkor}</dd>
           <dt>Kapcsolat</dt><dd>${s.online ? 'Online' : 'Offline'}</dd>
           <dt>Utolsó szinkron</dt><dd>${fmtDate(s.snapshotAt, true)}</dd>
-          ${s.lastError ? html`<dt>Utolsó hiba</dt><dd style="color:var(--err)">${s.lastError}</dd>` : ''}
+          ${s.lastError ? html`<dt>Utolsó hiba</dt><dd class="t-err">${s.lastError}</dd>` : ''}
         </dl>
         <div class="toolbar" style="margin-top:1rem;margin-bottom:0">
           <button class="btn btn-primary" data-a="sync" ${s.syncing ? 'disabled' : ''}>Szinkronizálás most</button>
@@ -55,7 +57,8 @@ export default {
         ${s.outbox.length ? html`${s.outbox.map(op => html`
           <div class="list-item" style="cursor:default">
             <div class="grow"><div>${opLabel(op)}</div><div class="small muted">${fmtDate(op.created, true)}
-              ${op.localError ? html` · <span style="color:var(--err)">${op.localError}</span>` : ''}</div></div>
+              ${op.by && op.by !== s.user.email ? html` · <span class="t-warn">${store.userName(op.by)} rögzítette – az ő bejelentkezésekor töltődik fel</span>` : ''}
+              ${op.localError ? html` · <span class="t-err">${op.localError}</span>` : ''}</div></div>
             <button class="btn btn-sm btn-danger" data-a="discard" data-id="${op.op_id}">Elvetés</button>
           </div>`)}` : html`<div class="empty">Minden adat fel van töltve.</div>`}
       </div>
@@ -64,7 +67,7 @@ export default {
         <div class="card-head"><h2>A szerver által elutasított műveletek</h2></div>
         ${s.rejected.map((r, i) => html`
           <div class="list-item" style="cursor:default">
-            <div class="grow"><div>${opLabel(r.op)}</div><div class="small" style="color:var(--err)">${r.error}</div>
+            <div class="grow"><div>${opLabel(r.op)}</div><div class="small t-err">${r.error}</div>
               <div class="small muted">${fmtDate(r.at, true)}</div></div>
             <button class="btn btn-sm" data-a="dismiss" data-i="${i}">Tudomásul vettem</button>
           </div>`)}
@@ -90,7 +93,8 @@ export default {
         root.querySelectorAll('[data-a=theme]').forEach(x => x.classList.toggle('on', x === b));
       }
       if (a === 'logout' || a === 'switch') {
-        if (s.outbox.length && !(await confirmDialog('Kijelentkezés', `${s.outbox.length} művelet még nincs feltöltve. Ezek a következő bejelentkezéskor töltődnek fel. Kijelentkezel?`, 'Kijelentkezés'))) return;
+        const mine = store.myOutbox().length;
+        if (mine && !(await confirmDialog('Kijelentkezés', `${mine} saját művelet még nincs feltöltve. Ezek a készüléken maradnak, és a következő bejelentkezésedkor töltődnek fel. Kijelentkezel?`, 'Kijelentkezés'))) return;
         store.logout();
       }
       if (a === 'discard' && await confirmDialog('Elvetés', 'Biztosan elveted ezt a még fel nem töltött műveletet? Nem vonható vissza.', 'Elvetés', 'danger')) {

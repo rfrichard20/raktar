@@ -1,6 +1,6 @@
 // Alkalmazás váz: útvonalak, navigáció, szinkron jelző.
 import * as store from './store.js';
-import { html, esc, toast, popover } from './ui.js';
+import { html, toast, popover, fmtTime } from './ui.js';
 import { ICONS } from './icons.js';
 import attekinto from './views/attekinto.js';
 import leltar from './views/leltar.js';
@@ -49,7 +49,7 @@ function renderStatus() {
   const el = $('sync');
   if (!s.user) { el.hidden = true; return; }
   el.hidden = false;
-  const n = s.outbox.length;
+  const n = store.myOutbox().length;
   let cls = 'ok', text;
   if (s.syncing) { cls = 'busy'; text = 'Szinkronizálás…'; }
   else if (s.authError) { cls = 'err'; text = 'Bejelentkezés szükséges'; }
@@ -58,7 +58,7 @@ function renderStatus() {
   else if (n) { cls = 'warn'; text = `${n} feltöltésre vár`; }
   else {
     const t = s.snapshotAt ? new Date(s.snapshotAt) : null;
-    text = t ? `Szinkronban · ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : 'Szinkronban';
+    text = t ? `Szinkronban · ${fmtTime(t)}` : 'Szinkronban';
   }
   if (s.rejected.length) { cls = 'err'; text += ` · ${s.rejected.length} elutasítva`; }
   // Csak ikon (+ darabszám, ha vár valami feltöltésre); a szöveg rámutatásra / koppintásra látszik
@@ -102,6 +102,7 @@ function render() {
   if (!sameView) { delete $('view').dataset.view; $('view').onclick = null; $('view').onchange = null; $('view').oninput = null; }
   r.view.render($('view'), params, { rerender: () => renderView(), go });
   if (sameView) window.scrollTo(0, scroll); else window.scrollTo(0, 0);
+  revealActiveTabs();
 }
 
 function renderView() {
@@ -109,7 +110,84 @@ function renderView() {
   const scroll = window.scrollY;
   current.view.render($('view'), current.params, { rerender: () => renderView(), go });
   window.scrollTo(0, scroll);
+  revealActiveTabs();
 }
+
+/** A fülsávban az aktív fül látható (középre görgetve) – újrarajzolás után ne ugorjon a sáv elejére. */
+function revealActiveTabs() {
+  $('view').querySelectorAll('.tabs').forEach(t => {
+    const a = t.querySelector('.active');
+    if (!a || t.scrollWidth <= t.clientWidth) return;
+    t.scrollLeft = Math.max(0, a.offsetLeft - (t.clientWidth - a.offsetWidth) / 2);
+  });
+}
+
+/* ---------- Keresőmezők: saját, jól megnyomható törlőgomb ---------- */
+// Minden input[type=search] köré (oldalon és felugró ablakban is) kerül egy törlőgomb.
+function enhanceSearch(input) {
+  if (input.dataset.enh) return;
+  input.dataset.enh = '1';
+  const wrap = document.createElement('span');
+  wrap.className = 'search-wrap';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'search-clear';
+  btn.title = 'Keresés törlése';
+  btn.setAttribute('aria-label', 'Keresés törlése');
+  btn.innerHTML = String(ICONS.x);
+  wrap.appendChild(btn);
+  const sync = () => wrap.classList.toggle('has-value', !!input.value);
+  input.addEventListener('input', sync);
+  btn.addEventListener('mousedown', e => e.preventDefault()); // a fókusz a mezőben marad
+  btn.addEventListener('click', () => {
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  });
+  sync();
+}
+new MutationObserver(muts => {
+  for (const m of muts) for (const n of m.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.matches('input[type=search]')) enhanceSearch(n);
+    n.querySelectorAll?.('input[type=search]').forEach(enhanceSearch);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+/* ---------- Legyintéses fülváltás (érintőképernyő) ---------- */
+// A lap tartalmán vízszintes legyintés: következő / előző fül. Nem indul beviteli mezőn,
+// a fülsávon, kapcsolón, illetve vízszintesen görgethető elemen (pl. széles táblázat).
+(function swipeTabs() {
+  const view = $('view');
+  let sw = null;
+  const scrollsX = el => {
+    for (let n = el; n && n !== view; n = n.parentElement) {
+      const ox = getComputedStyle(n).overflowX;
+      if ((ox === 'auto' || ox === 'scroll') && n.scrollWidth > n.clientWidth + 2) return true;
+    }
+    return false;
+  };
+  view.addEventListener('touchstart', e => {
+    sw = null;
+    if (e.touches.length !== 1 || !view.querySelector('.tabs')) return;
+    const t = e.target;
+    if (t.closest('input, textarea, select, .tabs, .seg, .chip-list') || scrollsX(t)) return;
+    sw = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+  }, { passive: true });
+  view.addEventListener('touchend', e => {
+    if (!sw) return;
+    const p = e.changedTouches[0];
+    const dx = p.clientX - sw.x, dy = p.clientY - sw.y, dt = Date.now() - sw.t;
+    sw = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy) || dt > 700) return;
+    const tabs = [...view.querySelectorAll('.tabs [data-tab]')];
+    const i = tabs.findIndex(b => b.classList.contains('active'));
+    const next = tabs[i + (dx < 0 ? 1 : -1)];
+    if (next) next.click();
+  }, { passive: true });
+})();
 
 store.subscribe(kind => {
   renderStatus();
@@ -130,10 +208,10 @@ $('sync').addEventListener('click', e => {
   const s = store.state;
   const el = $('sync');
   const t = s.snapshotAt ? new Date(s.snapshotAt) : null;
-  const last = t ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '–';
+  const last = t ? fmtTime(t) : '–';
   popover(el, html`<div style="padding:.35rem .5rem;max-width:260px">
       <b>${el.dataset.text || ''}</b>
-      <div class="small muted" style="margin-top:.2rem">Utolsó szinkron: ${last}${s.outbox.length ? ` · ${s.outbox.length} művelet vár feltöltésre` : ''}</div>
+      <div class="small muted" style="margin-top:.2rem">Utolsó szinkron: ${last}${store.myOutbox().length ? ` · ${store.myOutbox().length} művelet vár feltöltésre` : ''}</div>
       ${s.lastError ? html`<div class="small" style="color:var(--err);margin-top:.3rem">${s.lastError}</div>` : ''}
     </div>
     <div class="pop-foot"><button class="btn btn-sm" data-x="sync" ${s.syncing ? 'disabled' : ''}>Szinkronizálás most</button><a class="small" href="#/fiok" data-x="more">Részletek ›</a></div>`, {

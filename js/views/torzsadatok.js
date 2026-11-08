@@ -1,6 +1,6 @@
 // Törzsadatok (admin): tételek + beszerzési források, beszállítók, felhasználók.
 import * as store from '../store.js';
-import { html, fmtNum, fmtMoney, fmtDate, norm, modal, toast, formValues, parseNum, help, sec, confirmDialog } from '../ui.js';
+import { html, fmtNum, fmtMoney, fmtDate, matcher, compare, sortArrow, modal, toast, formValues, parseNum, help, sec, confirmDialog } from '../ui.js';
 import { itemSelector, tplIds, listSelect, bindListSelects } from './common.js';
 import { ICONS } from '../icons.js';
 
@@ -8,10 +8,9 @@ const L = window.RaktarLogic;
 const ui = {
   tab: 'tetelek', q: '', inactive: false,
   f: { kat: '', wh: '', sup: '', mod: '', role: '' },
-  sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1] },
+  sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1], emailek: ['nev', 1] },
 };
 
-const UNITS = ['db', 'm', 'tekercs', 'doboz', 'csomag', 'kg', 'l', 'pár'];
 const CYCLES = [[0, 'nincs'], [30, '30 nap (havonta)'], [60, '60 nap'], [90, '90 nap (negyedévente)'], [180, '180 nap (félévente)'], [365, '365 nap (évente)']];
 const ROLE_DESC = {
   admin: 'Minden funkció, törzsadatok és felhasználók kezelése.',
@@ -39,7 +38,7 @@ function editItem(t, ctx) {
     <td><input data-s="kiszereles" inputmode="decimal" value="${f.kiszereles || ''}" placeholder="1" style="width:80px"></td>
     <td><input data-s="egysegar" inputmode="decimal" value="${f.egysegar || ''}" placeholder="Ft" style="width:100px"></td>
     <td><input data-s="link" value="${f.link}" placeholder="opcionális"></td>
-    <td style="text-align:center"><input type="radio" name="prim" value="${f.forras_id}" ${f.elsodleges ? 'checked' : ''} aria-label="Elsődleges"></td>
+    <td style="text-align:center"><label class="star-pick" title="Elsődleges forrás"><input type="radio" name="prim" value="${f.forras_id}" ${f.elsodleges ? 'checked' : ''} aria-label="Elsődleges forrás">${ICONS.star}</label></td>
     <td><button type="button" class="icon-btn" data-del aria-label="Forrás törlése">✕</button></td></tr>`;
   const m = modal({
     title: isNew ? 'Új tétel' : t.megnevezes,
@@ -63,7 +62,7 @@ function editItem(t, ctx) {
       </div>
       <section class="fsec"><div class="fsec-title">Beszerzési források ${help('A kiszerelés beszállítónként eltérhet, a rendelési javaslat erre kerekít. Az elsődleges forrás az alapértelmezett. A link opcionális: ha üres, a beszállító webshop-keresője nyílik meg a cikkszámmal.')}</div>
         <div class="table-wrap"><table class="tbl small" id="src">
-          <thead><tr><th>Beszállító</th><th>Cikkszám</th><th>Kiszerelés</th><th>Egységár</th><th>Link</th><th>Elsődl.</th><th></th></tr></thead>
+          <thead><tr><th>Beszállító</th><th>Cikkszám</th><th>Kiszerelés</th><th>Egységár</th><th>Link</th><th title="Elsődleges forrás">${ICONS.star}</th><th></th></tr></thead>
           <tbody>${orig.map(srcRow)}</tbody></table></div>
         <button type="button" class="btn btn-sm" data-addsrc style="margin-top:.5rem">+ Forrás</button></section>`,
     actions: [{ label: 'Mégse', value: null }, {
@@ -81,6 +80,7 @@ function editItem(t, ctx) {
             kiszereles: parseNum(get('kiszereles')) || 1, egysegar: parseNum(get('egysegar')) || 0, link: get('link'),
             elsodleges: prim ? prim === tr.dataset.fid : rows.length === 1, megjegyzes: '' };
           if (!f.beszallito_id) { toast('Minden forrásnál válassz beszállítót (vagy töröld a sort).', 'error'); return false; }
+          if (f.link && !/^https?:\/\//i.test(f.link)) { toast('A link http:// vagy https:// kezdetű legyen (különben nem menthető).', 'error'); return false; }
           seen.add(f.forras_id);
           const o = orig.find(x => x.forras_id === f.forras_id);
           const changed = !o || ['beszallito_id', 'cikkszam', 'kiszereles', 'egysegar', 'link', 'elsodleges'].some(k => String(o[k]) !== String(f[k]));
@@ -122,16 +122,68 @@ function editSupplier(b) {
           <option value="webshop" ${mode === 'webshop' ? 'selected' : ''}>Webshopban</option>
           <option value="email" ${mode === 'email' ? 'selected' : ''}>E-mailben</option></select></label>
         <label class="field span-2"><span>Webshop keresés címe ${help(html`Nyisd meg a webshopot, keress rá egy tetszőleges cikkszámra, és másold ide a böngésző címsorából a címet úgy, hogy a cikkszám helyére <b>{cikkszam}</b> kerüljön. Pl. <code>https://shop.hu/kereses?q={cikkszam}</code>. Így a megnyitás rögtön a termékre keres. Ha üres, a weboldal nyílik meg, a cikkszám pedig a vágólapra kerül.`)}</span>
-          <input name="kereso_url" value="${b.kereso_url}" placeholder="https://…/kereses?q={cikkszam}"></label>`)}
+          <input name="kereso_url" value="${b.kereso_url}" placeholder="https://…/kereses?q={cikkszam}"></label>
+        <label class="field span-2"><span>Alapértelmezett e-mail sablon</span><select name="email_sablon">
+          <option value="">— az első megfelelő sablon —</option>
+          ${L.emailTemplates(store.state.db).map(s => html`<option value="${s.sablon_id}" ${s.sablon_id === b.email_sablon ? 'selected' : ''}>${s.nev} (${L.EMAIL_TYPES[s.tipus]})</option>`)}</select></label>`)}
       ${sec('Egyéb', html`
         <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" value="${b.megjegyzes}"></label>
         <label class="check"><input type="checkbox" name="aktiv" ${b.aktiv ? 'checked' : ''}> Aktív</label>`)}`,
     actions: [{ label: 'Mégse', value: null }, {
       label: 'Mentés', kind: 'primary', onClick: async el => {
-        try { await store.enqueue({ type: 'mentes', table: 'Beszallitok', row: { ...b, ...formValues(el) } }); toast('Mentve', 'ok'); }
+        const v = formValues(el);
+        // Csak http(s) cím menthető (a szerver a többit törölné) – jelezzük, ne vesszen el csendben
+        const bad = ['weboldal', 'kereso_url'].find(k => v[k].trim() && !/^https?:\/\//i.test(v[k].trim()));
+        if (bad) { toast(`A ${bad === 'weboldal' ? 'weboldal' : 'webshop keresés'} címe http:// vagy https:// kezdetű legyen.`, 'error', 6000); return false; }
+        try { await store.enqueue({ type: 'mentes', table: 'Beszallitok', row: { ...b, ...v } }); toast('Mentve', 'ok'); }
         catch (x) { toast(x.message, 'error', 6000); return false; }
       },
     }],
+  });
+}
+
+/* ---------- E-mail sablon szerkesztő ---------- */
+function editEmailTpl(s) {
+  const isNew = !s;
+  s = s || { sablon_id: L.newId('E', 6), nev: '', tipus: 'rendeles', targy: 'Megrendelés – {rendelesszam}', szoveg: '' };
+  let lastField = null; // a mező, ahová a helyőrző beszúródik
+  const m = modal({
+    title: isNew ? 'Új e-mail sablon' : s.nev,
+    wide: true,
+    body: html`
+      ${sec('Sablon', html`
+        <label class="field"><span>Név *</span><input name="nev" value="${s.nev}" placeholder="pl. Megrendelés – tegező"></label>
+        <label class="field"><span>Típus</span><select name="tipus">${Object.entries(L.EMAIL_TYPES).map(([k, l]) => html`<option value="${k}" ${k === s.tipus ? 'selected' : ''}>${l}</option>`)}</select></label>
+        <label class="field span-2"><span>Tárgy</span><input name="targy" value="${s.targy}" data-ins></label>`)}
+      <section class="fsec"><div class="fsec-title">Szöveg ${help('A kapcsos zárójeles mezők küldéskor kitöltődnek. Kattints egy mezőre, és a kurzor helyére kerül (a tárgyba vagy a szövegbe, attól függően, hol álltál utoljára).')}</div>
+        <div class="chip-list" style="margin:0 0 .5rem">${Object.entries(L.EMAIL_FIELDS).map(([k, d]) => html`<button type="button" class="chip" data-field="${k}" title="${d}">{${k}}</button>`)}</div>
+        <textarea name="szoveg" class="mail-body" data-ins placeholder="Tisztelt {kapcsolattarto}!&#10;&#10;…&#10;&#10;{tetelek}">${s.szoveg}</textarea>
+      </section>`,
+    actions: [
+      { label: 'Mégse', value: null },
+      ...(isNew ? [] : [{ label: 'Törlés', kind: 'danger', onClick: async () => {
+        const used = store.state.db.Beszallitok.filter(b => b.email_sablon === s.sablon_id).length;
+        if (!(await confirmDialog('Sablon törlése', `Biztosan törlöd: „${s.nev}”?` + (used ? ` ${used} beszállító alapértelmezett sablonja – náluk az első megfelelő sablon lesz használva.` : ''), 'Törlés', 'danger'))) return false;
+        try { await store.enqueue({ type: 'torles', table: 'Email_sablonok', id: s.sablon_id }); toast('Törölve', 'ok'); }
+        catch (x) { toast(x.message, 'error'); return false; }
+      } }]),
+      { label: 'Mentés', kind: 'primary', onClick: async el => {
+        const v = formValues(el);
+        try { await store.enqueue({ type: 'mentes', table: 'Email_sablonok', row: { ...s, ...v } }); toast('Mentve', 'ok'); }
+        catch (x) { toast(x.message, 'error', 6000); return false; }
+      } },
+    ],
+  });
+  m.el.addEventListener('focusin', e => { if (e.target.matches('[data-ins]')) lastField = e.target; });
+  m.el.addEventListener('click', e => {
+    const b = e.target.closest('[data-field]');
+    if (!b) return;
+    const f = lastField || m.el.querySelector('[name=szoveg]');
+    const ins = `{${b.dataset.field}}`;
+    const a = f.selectionStart ?? f.value.length, z = f.selectionEnd ?? f.value.length;
+    f.value = f.value.slice(0, a) + ins + f.value.slice(z);
+    f.focus();
+    f.selectionStart = f.selectionEnd = a + ins.length;
   });
 }
 
@@ -163,13 +215,12 @@ function editUser(u) {
 }
 
 /* ---------- Listák: oszlopok, rendezés, szűrők ---------- */
-const cmp = (a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a ?? '').localeCompare(String(b ?? ''), 'hu'));
 
 function columns(db) {
   const srcCount = id => L.sourcesFor(db, id).length;
   return {
     tetelek: [
-      ['megnevezes', 'Megnevezés', t => t.megnevezes, t => html`${t.megnevezes}<div class="small muted">${t.tetel_id}</div>`, 'main'],
+      ['megnevezes', 'Megnevezés', t => t.megnevezes, t => html`${t.megnevezes}<div class="sub">${t.tetel_id}</div>`, 'main'],
       ['kategoria', 'Kategória', t => t.kategoria, t => t.kategoria],
       ['hely', 'Hely', t => `${t.raktar || ''} ${t.polc || ''}`, t => store.placeLabel(t)],
       ['me', 'Me.', t => t.mertekegyseg, t => t.mertekegyseg, 'm-hide'],
@@ -182,12 +233,18 @@ function columns(db) {
       ['nev', 'Név', b => b.nev, b => b.nev, 'main'],
       ['mod', 'Rendelés', b => L.orderMode(b), b => html`<span class="badge ${L.orderMode(b) === 'webshop' ? 'badge-info' : 'badge-muted'}">${L.orderMode(b) === 'webshop' ? 'Webshop' : 'E-mail'}</span>`],
       ['kapcs', 'Kapcsolattartó', b => b.kapcsolattarto, b => b.kapcsolattarto],
-      ['email', 'E-mail', b => b.email, b => b.email],
+      ['email', 'E-mail', b => b.email, b => b.email, 'c-wide'],
       ['tel', 'Telefon', b => b.telefon, b => b.telefon],
       ['tetelek', 'Tételek', b => db.Forrasok.filter(f => f.beszallito_id === b.beszallito_id).length, b => {
         const n = db.Forrasok.filter(f => f.beszallito_id === b.beszallito_id).length;
         return n ? html`<button class="link-btn" data-supf="${b.beszallito_id}" title="A beszállító tételeinek megjelenítése">${n} ›</button>` : html`<span class="muted">0</span>`;
       }, 'num'],
+    ],
+    emailek: [
+      ['nev', 'Név', s => s.nev, s => s.nev, 'main'],
+      ['tipus', 'Típus', s => s.tipus, s => html`<span class="badge ${s.tipus === 'ajanlat' ? 'badge-muted' : 'badge-info'}">${L.EMAIL_TYPES[s.tipus] || s.tipus}</span>`],
+      ['targy', 'Tárgy', s => s.targy, s => s.targy, 'c-wide'],
+      ['hasznalja', 'Beszállítók', s => db.Beszallitok.filter(b => b.email_sablon === s.sablon_id).length, s => db.Beszallitok.filter(b => b.email_sablon === s.sablon_id).length || '–', 'num'],
     ],
     sablonok: [
       ['nev', 'Név', s => s.nev, s => s.nev, 'main'],
@@ -197,7 +254,7 @@ function columns(db) {
     ],
     felhasznalok: [
       ['nev', 'Név', u => u.nev, u => u.nev, 'main'],
-      ['email', 'E-mail', u => u.email, u => u.email],
+      ['email', 'E-mail', u => u.email, u => u.email, 'c-wide'],
       ['szerep', 'Szerepkör', u => L.ROLES[u.szerepkor] || 0, u => html`<span class="badge badge-info">${L.ROLE_LABELS[u.szerepkor] || u.szerepkor}</span>`],
       ['aktiv', 'Állapot', u => (u.aktiv ? 1 : 0), u => (u.aktiv ? html`<span class="badge badge-ok">aktív</span>` : html`<span class="badge badge-muted">inaktív</span>`)],
     ],
@@ -206,6 +263,7 @@ function columns(db) {
 
 function filtered(db) {
   const f = ui.f;
+  const match = matcher(ui.q);
   if (ui.tab === 'tetelek') {
     return db.Tetelek.filter(t => (ui.inactive || t.aktiv) && match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
       .filter(t => !f.kat || t.kategoria === f.kat)
@@ -217,27 +275,24 @@ function filtered(db) {
       .filter(b => !f.mod || L.orderMode(b) === f.mod);
   }
   if (ui.tab === 'sablonok') return (db.Leltar_sablonok || []).filter(s => match(s.nev));
+  if (ui.tab === 'emailek') return (db.Email_sablonok || []).filter(s => match(`${s.nev} ${s.targy}`));
   return db.Felhasznalok.filter(u => (ui.inactive || u.aktiv) && match(`${u.nev} ${u.email}`)).filter(u => !f.role || u.szerepkor === f.role);
 }
 
-function match(text) {
-  const words = norm(ui.q).split(/\s+/).filter(Boolean);
-  const hay = norm(text);
-  return words.every(w => hay.includes(w));
-}
 
 function tableHtml() {
   const db = store.state.db;
   const cols = columns(db)[ui.tab];
   const [sk, sd] = ui.sort[ui.tab];
   const col = cols.find(c => c[0] === sk) || cols[0];
-  const list = filtered(db).sort((a, b) => cmp(col[2](a), col[2](b)) * sd);
-  const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id' }[ui.tab];
-  return html`<table class="tbl responsive"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${c[0] === sk ? (sd > 0 ? ' ▲' : ' ▼') : ''}</span></th>`)}</tr></thead>
+  const list = filtered(db).sort((a, b) => compare(col[2](a), col[2](b)) * sd);
+  const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id', emailek: 'sablon_id' }[ui.tab];
+  // Mobilon kártyák: a „main” oszlop a kártya címe, a többi címkézett mező 3 oszlopba tördelve
+  return html`<table class="tbl cards nochk flow"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${sortArrow(c[0] === sk, sd)}</span></th>`)}</tr></thead>
     <tbody>${list.length ? list.map(r => html`<tr class="click ${r.aktiv === false ? 'off' : ''}" data-id="${r[key]}">${cols.map(c =>
-      html`<td class="${c[4] || ''}" ${c[4] === 'main' ? '' : html`data-l="${c[1]}"`}>${c[3](r)}</td>`)}</tr>`)
+      html`<td class="${c[4] === 'main' ? 'c-main' : c[4] || ''}" ${c[4] === 'main' ? '' : html`data-l="${c[1]}"`}>${c[3](r)}</td>`)}</tr>`)
       : html`<tr><td colspan="${cols.length}" class="empty">Nincs a szűrésnek megfelelő elem.</td></tr>`}</tbody></table>
-    <div class="small muted" style="padding:.5rem .75rem">${list.length} elem</div>`;
+    <div class="tbl-foot">${list.length} elem</div>`;
 }
 
 function filtersHtml() {
@@ -250,7 +305,7 @@ function filtersHtml() {
       ${whs.length > 1 ? sel('wh', 'Minden raktár', whs.map(w => [w, w])) : ''}
       ${sel('sup', 'Minden beszállító', [['-', '— forrás nélkül —'], ...db.Beszallitok.slice().sort((a, b) => a.nev.localeCompare(b.nev, 'hu')).map(b => [b.beszallito_id, b.nev])])}`;
   }
-  if (ui.tab === 'sablonok') return '';
+  if (ui.tab === 'sablonok' || ui.tab === 'emailek') return '';
   if (ui.tab === 'beszallitok') return sel('mod', 'Minden rendelési mód', [['webshop', 'Webshop'], ['email', 'E-mail']]);
   return sel('role', 'Minden szerepkör', Object.keys(L.ROLES).reverse().map(r => [r, L.ROLE_LABELS[r]]));
 }
@@ -335,7 +390,7 @@ export default {
   render(root, params, ctx) {
     // Admin: minden fül; raktáros: csak a leltársablonok
     const isAdmin = store.can('admin');
-    const allLabels = { tetelek: 'Tételek', beszallitok: 'Beszállítók', listak: 'Listák', sablonok: 'Leltársablonok', felhasznalok: 'Felhasználók' };
+    const allLabels = { tetelek: 'Tételek', beszallitok: 'Beszállítók', listak: 'Listák', sablonok: 'Leltársablonok', emailek: 'E-mail sablonok', felhasznalok: 'Felhasználók' };
     const labels = isAdmin ? allLabels : { sablonok: allLabels.sablonok };
     if (params.tab && labels[params.tab]) { ui.tab = params.tab; delete params.tab; history.replaceState(null, '', '#/torzsadatok'); }
     if (!labels[ui.tab]) ui.tab = Object.keys(labels)[0];
@@ -346,7 +401,7 @@ export default {
       ui.tab = 'tetelek';
       if (t) setTimeout(() => editItem(t, ctx), 0);
     }
-    const newLabel = { tetelek: '+ Új tétel', beszallitok: '+ Új beszállító', felhasznalok: '+ Új felhasználó', sablonok: '+ Új sablon' };
+    const newLabel = { tetelek: '+ Új tétel', beszallitok: '+ Új beszállító', felhasznalok: '+ Új felhasználó', sablonok: '+ Új sablon', emailek: '+ Új e-mail sablon' };
     const refresh = () => { root.querySelector('#tbl').innerHTML = String(tableHtml()); };
     const openTpl = tpl => itemSelector({ mode: 'template', tpl });
     // Megj.: a gyökéren nem lehet data-tab attribútum, mert a kattintáskezelő a [data-tab]-ot keresi
@@ -387,8 +442,11 @@ export default {
       <div class="toolbar"><input type="search" id="q" placeholder="Keresés…" value="${ui.q}">
         ${filtersHtml()}
         ${ui.tab === 'sablonok' ? help('A leltársablon egy elmentett tételösszeállítás. A Leltár oldalon az „Egyedi / sablon” kártyáról egy kattintással indítható. Mindenki számára elérhető.')
+          : ui.tab === 'emailek' ? help('A megrendelő és ajánlatkérő e-mailek sablonjai. A beszállítónál beállítható, melyik legyen az alapértelmezett (pl. tegező viszony). Küldéskor a sablon kitöltve, szerkeszthetően jelenik meg.')
           : html`<label class="check small"><input type="checkbox" id="inact" ${ui.inactive ? 'checked' : ''}> Inaktívak is</label>`}</div>
       ${ui.tab === 'felhasznalok' && store.isDemo ? html`<div class="notice notice-info small">Éles használatban a felhasználó a megadott Google-fiókkal tud belépni.</div>` : ''}
+      ${ui.tab === 'emailek' && !(store.state.db.Email_sablonok || []).length ? html`<div class="notice notice-info small">Még nincs saját sablon – küldéskor a beépített alapsablonok (hivatalos, tegező, ajánlatkérés) használhatók.
+        <button class="btn btn-sm" data-a="seedmail" style="margin-left:.5rem">Alapsablonok felvétele szerkesztéshez</button></div>` : ''}
       <div class="card"><div class="table-wrap" id="tbl">${tableHtml()}</div></div>`);
     root.querySelector('#q').addEventListener('input', e => { ui.q = e.target.value; refresh(); });
     root.querySelector('#inact')?.addEventListener('change', e => { ui.inactive = e.target.checked; refresh(); });
@@ -409,10 +467,18 @@ export default {
         ui.sort[ui.tab] = s[0] === th.dataset.sort ? [s[0], -s[1]] : [th.dataset.sort, 1];
         return refresh();
       }
+      if (e.target.closest('[data-a="seedmail"]')) {
+        (async () => {
+          for (const s of L.DEFAULT_EMAIL_TEMPLATES) await store.enqueue({ type: 'mentes', table: 'Email_sablonok', row: { ...s } });
+          toast('Alapsablonok felvéve', 'ok'); ctx.rerender();
+        })().catch(x => toast(x.message, 'error'));
+        return;
+      }
       if (e.target.closest('[data-a="new"]')) {
         if (ui.tab === 'tetelek') editItem(null, ctx);
         else if (ui.tab === 'beszallitok') editSupplier(null);
         else if (ui.tab === 'sablonok') openTpl(null);
+        else if (ui.tab === 'emailek') editEmailTpl(null);
         else editUser(null);
         return;
       }
@@ -421,6 +487,7 @@ export default {
       if (ui.tab === 'tetelek') editItem(store.get('Tetelek', tr.dataset.id), ctx);
       else if (ui.tab === 'beszallitok') editSupplier(store.get('Beszallitok', tr.dataset.id));
       else if (ui.tab === 'sablonok') openTpl(store.get('Leltar_sablonok', tr.dataset.id));
+      else if (ui.tab === 'emailek') editEmailTpl(store.get('Email_sablonok', tr.dataset.id));
       else editUser(store.get('Felhasznalok', tr.dataset.id));
     };
   },

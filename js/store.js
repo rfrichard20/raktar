@@ -29,11 +29,21 @@ function emit(kind = 'data') { listeners.forEach(fn => { try { fn(kind); } catch
 // Szerepkör ('raktaros') vagy láthatósági jog ('arak', 'rendeles', 'kimutatas') – lásd RaktarLogic.PERMS
 export const can = what => L.can(state.user, what);
 
+// Egy szinkron kérésben legfeljebb ennyi művelet megy fel (a szerver 200 fölött az egészet elutasítaná)
+const SYNC_BATCH = 100;
+
+/** A művelet a bejelentkezett felhasználóé-e (régi, címke nélküli műveletek: igen). */
+const isMine = op => !op.by || (state.user && op.by === state.user.email);
+/** A bejelentkezett felhasználó feltöltésre váró műveletei. */
+export const myOutbox = () => state.outbox.filter(isMine);
+
 function recompute() {
   const empty = {};
   L.TABLES.forEach(t => { empty[t] = []; });
   const db = state.snapshot ? L.cloneDb(state.snapshot) : empty;
+  // Más felhasználó (közös készüléken korábban rögzített) műveletei csak az ő bejelentkezésekor kerülnek fel
   for (const op of state.outbox) {
+    if (!isMine(op)) { op.localError = null; continue; }
     try { L.applyOp(db, op, state.user, op.created); op.localError = null; }
     catch (e) { op.localError = e.message; }
   }
@@ -65,7 +75,8 @@ export async function init() {
 }
 
 export async function setSession(token, user) {
-  // Másik felhasználó: a régi gyorsítótárat eldobjuk (a kimenő sor marad, az új felhasználó nevében megy fel)
+  // Másik felhasználó: a régi gyorsítótárat eldobjuk. A kimenő sor marad, de mindenki csak a saját
+  // rögzítéseit tölti fel (op.by), így más nevében rögzített adat nem kerül fel az ő nevében.
   if (state.user && state.user.email !== user.email) {
     state.snapshot = null;
     await idb.del('snapshot');
@@ -90,6 +101,7 @@ export async function logout() {
 export async function enqueue(op) {
   op.op_id = L.newId('OP', 12);
   op.created = new Date().toISOString();
+  op.by = state.user && state.user.email; // a rögzítő: csak az ő nevében töltődik fel
   // Helyi ellenőrzés: ha a logika már itt elutasítja, nem kerül a sorba
   const test = L.cloneDb(state.db);
   L.applyOp(test, op, state.user, op.created); // hibát dob, ha érvénytelen
@@ -110,7 +122,7 @@ export function sync() {
     syncPromise = null;
     if (syncAgain) {
       syncAgain = false;
-      if (state.outbox.length && state.online) sync();
+      if (myOutbox().length && state.online && state.token && !state.lastError) sync();
     }
   });
   return syncPromise;
@@ -119,7 +131,9 @@ export function sync() {
 async function doSync() {
   state.syncing = true;
   emit('status');
-  const sent = state.outbox.slice();
+  const mine = myOutbox();
+  const sent = mine.slice(0, SYNC_BATCH);
+  if (mine.length > sent.length) syncAgain = true; // a többi a következő körben
   try {
     const res = sent.length ? await backend.sync(state.token, sent) : await backend.fetchAll(state.token);
     if (sent.length) {
@@ -181,18 +195,22 @@ export const drafts = {
 
 /* ---------- Kényelmi lekérdezések ---------- */
 export const get = (table, id) => L.get(state.db, table, id);
+/** Tétel azonosító alapján; ha már nincs meg (pl. törölt), egy helyettesítő, hogy a lista ne álljon le. */
+export const itemOrStub = id => get('Tetelek', id) || { tetel_id: id, megnevezes: id, mertekegyseg: '' };
 export const items = () => state.db.Tetelek;
 export const activeItems = () => state.db.Tetelek.filter(t => t.aktiv);
 export const supplierName = id => (get('Beszallitok', id) || {}).nev || '—';
+/** Rendelés kereshető szövege (beszállító, rendelésszám, belső azonosító, megjegyzés). */
+export const orderSearchText = o => `${supplierName(o.beszallito_id)} ${o.rendeles_id} ${o.belso_azon || ''} ${o.megjegyzes || ''}`;
 export const userName = email => {
   const u = (state.db.Felhasznalok || []).find(x => x.email === email);
   return u ? u.nev || email : email || '—';
 };
 export const warehouses = () => [...new Set(state.db.Tetelek.filter(t => t.aktiv).map(t => t.raktar || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
-/** Hely felirat: több raktár esetén „Raktár · Polc”, egyébként csak a polc. */
-export const placeLabel = t => {
-  const multi = warehouses().length > 1;
-  return [multi ? t.raktar : '', t.polc].filter(Boolean).join(' · ') || '—';
-};
+/** Hely felirat: „Raktár · Polc” (ami ki van töltve). */
+export const placeLabel = t => [t.raktar, t.polc].filter(Boolean).join(' · ') || '—';
+/** Tételek bejárási sorrendje: raktár, polc, név (a hely nélküliek a végén) – leltár, tételválasztó. */
+export const byPlace = (a, b) => (a.raktar || '~').localeCompare(b.raktar || '~', 'hu') ||
+  (a.polc || '~').localeCompare(b.polc || '~', 'hu') || a.megnevezes.localeCompare(b.megnevezes, 'hu');
 export const categories = () => [...new Set(state.db.Tetelek.map(t => t.kategoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
 export { isDemo, backend, L };

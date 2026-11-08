@@ -1,6 +1,7 @@
 // Több nézetben használt elemek.
 import * as store from '../store.js';
-import { html, raw, esc, norm, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, STATUS_LABEL, fmtMoney } from '../ui.js';
+import { ICONS } from '../icons.js';
+import { html, raw, esc, matcher, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, copyText, help, STATUS_TEXT, fmtMoney } from '../ui.js';
 
 const L = window.RaktarLogic;
 
@@ -14,22 +15,21 @@ export function attachPicker(input, opts) {
   const label = opts.label || (t => `${t.megnevezes}`);
   const close = () => { if (list) { list.remove(); list = null; } };
   const show = () => {
-    const q = norm(input.value).trim();
+    const q = input.value.trim();
     const ex = opts.exclude ? opts.exclude() : new Set();
-    const words = q.split(/\s+/).filter(Boolean);
-    matches = opts.items().filter(t => !ex.has(t.tetel_id)).filter(t => {
-      const hay = norm(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.tetel_id} ${(L.sourcesFor(store.state.db, t.tetel_id).map(f => f.cikkszam).join(' '))}`);
-      return words.every(w => hay.includes(w));
-    }).slice(0, 30);
+    const match = matcher(q);
+    matches = opts.items().filter(t => !ex.has(t.tetel_id) &&
+      match(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.tetel_id} ${L.sourcesFor(store.state.db, t.tetel_id).map(f => f.cikkszam).join(' ')}`))
+      .slice(0, 30);
     close();
     if (!q && !opts.showAll) return;
     const canCreate = opts.allowCreate !== false && store.can('raktaros') && q;
     list = document.createElement('div');
     list.className = 'picker-list';
-    list.innerHTML = (matches.length
-      ? matches.map((t, i) => `<button type="button" data-i="${i}" class="${i === hl ? 'hl' : ''}">${esc(label(t))}<div class="small muted">${esc(t.kategoria || '')} · ${esc(store.placeLabel(t))}</div></button>`).join('')
-      : '<div class="empty small">Nincs ilyen tétel a törzsadatokban.</div>')
-      + (canCreate ? `<button type="button" data-new class="picker-new">+ Új tétel felvétele: „${esc(input.value.trim())}”</button>` : '');
+    list.innerHTML = String(html`${matches.length
+      ? matches.map((t, i) => html`<button type="button" data-i="${i}" class="${i === hl ? 'hl' : ''}">${label(t)}<div class="small muted">${t.kategoria || ''} · ${store.placeLabel(t)}</div></button>`)
+      : html`<div class="empty small">Nincs ilyen tétel a törzsadatokban.</div>`}
+      ${canCreate ? html`<button type="button" data-new class="picker-new">+ Új tétel felvétele: „${q}”</button>` : ''}`);
     wrap.appendChild(list);
     list.addEventListener('mousedown', e => e.preventDefault());
     list.addEventListener('click', e => {
@@ -171,14 +171,14 @@ export const tplIds = s => String(s.tetelek || '').split(',').map(x => x.trim())
  *  mode 'template' – leltársablon létrehozása / szerkesztése / törlése (név + tételek)
  */
 export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {}) {
-  const items = store.activeItems().slice().sort((a, b) =>
-    (a.raktar || '~').localeCompare(b.raktar || '~', 'hu') || (a.polc || '~').localeCompare(b.polc || '~', 'hu') || a.megnevezes.localeCompare(b.megnevezes, 'hu'));
+  const items = store.activeItems().slice().sort(store.byPlace);
   const sel = new Set(tpl ? tplIds(tpl) : []);
-  const f = { q: '', cat: '', only: false };
+  // Meglévő sablon szerkesztésekor alapból csak a benne lévő tételek látszanak
+  const f = { q: '', cat: '', only: !!(tpl && sel.size) };
   const visible = () => {
-    const words = norm(f.q).split(/\s+/).filter(Boolean);
+    const match = matcher(f.q);
     return items.filter(t => (!f.cat || t.kategoria === f.cat) && (!f.only || sel.has(t.tetel_id)) &&
-      words.every(w => norm(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.raktar || ''}`).includes(w)));
+      match(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.raktar || ''}`));
   };
   const listHtml = () => {
     const v = visible();
@@ -219,7 +219,7 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
         <div class="toolbar">
           <input type="search" data-f="q" placeholder="Keresés…">
           <select data-f="cat"><option value="">Minden kategória</option>${store.categories().map(c => html`<option>${c}</option>`)}</select>
-          <label class="check small"><input type="checkbox" data-f="only"> Csak a kijelöltek</label>
+          <label class="check small"><input type="checkbox" data-f="only" ${f.only ? 'checked' : ''}> Csak a kijelöltek</label>
         </div>
         <div class="toolbar" style="justify-content:space-between">
           <span><b data-count>${sel.size}</b> tétel kijelölve</span>
@@ -250,30 +250,77 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
   return m;
 }
 
-/* ---------- Mozgástípus ikonok ---------- */
-const MOVE_SVG = {
-  // vágólap pipával
-  LELTAR: '<path d="M9 4h6v3H9z"/><rect x="5" y="5" width="14" height="16" rx="2"/><path d="m9 13 2 2 4-4"/>',
-  // lefelé nyíl tálcába
-  BEERKEZES: '<path d="M12 4v10m-4-4 4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
-  // felfelé nyíl tálcából
-  KIVET: '<path d="M12 15V5m-4 4 4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
-  // ceruza
-  KORREKCIO: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
-};
-export function moveIcon(tipus) {
-  return raw(`<span class="mv-ico mv-${tipus}" title="${esc(L.MOVE_TYPES[tipus] || tipus)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${MOVE_SVG[tipus] || ''}</svg></span>`);
-}
-export function moveQty(m) {
-  const n = fmtNum(Math.abs(m.mennyiseg));
-  if (m.tipus === 'LELTAR') return '= ' + n;
-  if (m.tipus === 'KIVET') return '− ' + n;
-  return (m.mennyiseg < 0 ? '− ' : '+ ') + n;
+/* ---------- E-mail összeállítása sablonból ---------- */
+/**
+ * Megrendelés / ajánlatkérés e-mail: sablonválasztás, szerkeszthető címzett, tárgy és szöveg.
+ * lines: [{ megnevezes, cikkszam, q, me }]; rid: rendelésszám (ajánlatkérésnél nincs).
+ */
+export function emailDialog({ supId, lines, rid = '', tipus = 'rendeles', title }) {
+  const db = store.state.db;
+  const sup = store.get('Beszallitok', supId) || { nev: '', email: '', kapcsolattarto: '' };
+  const tpls = L.emailTemplates(db);
+  const ofType = tpls.filter(s => s.tipus === tipus);
+  const pick = ofType.find(s => s.sablon_id === sup.email_sablon) || ofType[0] || tpls[0];
+  const kontakt = String(sup.kapcsolattarto || '').trim();
+  const vals = {
+    beszallito: sup.nev, kapcsolattarto: kontakt || 'Partnerünk', keresztnev: kontakt ? kontakt.split(/\s+/).pop() : '',
+    tetelek: L.emailItemList(lines.map(l => ({ ...l, qText: `${fmtNum(l.q)} ${l.me || ''}`.trim() }))),
+    rendelesszam: rid || '–', belso_azon: (rid && store.get('Rendelesek', rid)?.belso_azon) || '–', datum: fmtDate(new Date().toISOString()),
+    felado: store.state.user?.nev || '', felado_email: store.state.user?.email || '',
+  };
+  const fill = s => ({ targy: L.fillTemplate(s.targy, vals), szoveg: L.fillTemplate(s.szoveg, vals) });
+  const first = fill(pick);
+  const m = modal({
+    title: title || (tipus === 'ajanlat' ? `Ajánlatkérés – ${sup.nev}` : `Megrendelés – ${sup.nev}`),
+    wide: true,
+    body: html`
+      <div class="form-grid">
+        <label class="field"><span>Sablon</span><select name="sablon">
+          ${Object.entries(L.EMAIL_TYPES).map(([k, lbl]) => html`<optgroup label="${lbl}">${tpls.filter(s => s.tipus === k).map(s =>
+            html`<option value="${s.sablon_id}" ${s === pick ? 'selected' : ''}>${s.nev}</option>`)}</optgroup>`)}</select></label>
+        <label class="field"><span>Címzett</span><input name="to" type="email" value="${sup.email || ''}" placeholder="beszállító e-mail címe"></label>
+        <label class="field span-2"><span>Tárgy</span><input name="targy" value="${first.targy}"></label>
+      </div>
+      <label class="field" style="margin-top:.75rem"><span>Szöveg (szerkeszthető)</span>
+        <textarea name="szoveg" class="mail-body" spellcheck="true">${first.szoveg}</textarea></label>
+      <p class="small muted" style="margin-top:.5rem">A sablonok a Törzsadatok → E-mail sablonok fülön szerkeszthetők; a beszállítónál beállítható az alapértelmezett.</p>`,
+    actions: [
+      { label: 'Másolás', onClick: el => { copyText(el.querySelector('[name=szoveg]').value); return false; } },
+      { label: 'E-mail megnyitása', kind: 'primary', onClick: el => {
+        const to = el.querySelector('[name=to]').value.trim();
+        const subject = el.querySelector('[name=targy]').value;
+        const body = el.querySelector('[name=szoveg]').value;
+        location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        return false;
+      } },
+      { label: 'Kész', value: true },
+    ],
+  });
+  m.el.querySelector('[name=sablon]').addEventListener('change', e => {
+    const s = tpls.find(x => x.sablon_id === e.target.value);
+    if (!s) return;
+    const f = fill(s);
+    m.el.querySelector('[name=targy]').value = f.targy;
+    m.el.querySelector('[name=szoveg]').value = f.szoveg;
+  });
+  return m;
 }
 
-export function statusBadge(st) {
-  const s = st.statusz;
-  return html`<span class="badge badge-${s === 'hiany' ? 'err' : s === 'figyelem' ? 'warn' : 'ok'}">${STATUS_LABEL[s]}</span>`;
+/* ---------- Mozgástípus ikonok ---------- */
+const MOVE_SVG = {
+  LELTAR: '<path d="M5 9h14M5 15h14"/>',            // „=” – megszámolt érték
+  BEERKEZES: '<path d="M12 4v15m-6-6 6 6 6-6"/>',    // lefelé nyíl – be
+  KIVET: '<path d="M12 20V5m-6 6 6-6 6 6"/>',         // felfelé nyíl – ki
+  KORREKCIO: '<path d="M5 19l1-4L16 5l3 3L9 18z"/>',  // ceruza – javítás
+};
+export function moveIcon(tipus) {
+  return raw(`<span class="mv-ico mv-${esc(tipus)}" title="${esc(L.MOVE_TYPES[tipus] || tipus)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${MOVE_SVG[tipus] || ''}</svg></span>`);
+}
+/** Mennyiség a mozgás ikonja mellé: az irányt az ikon mutatja, előjel csak a korrekciónál kell (az lehet + és − is). */
+export function moveQty(m) {
+  const n = fmtNum(Math.abs(m.mennyiseg));
+  if (m.tipus === 'KORREKCIO') return (m.mennyiseg < 0 ? '− ' : '+ ') + n;
+  return n;
 }
 
 /** Tétel részletei: készlet, források, mozgástörténet, korrekció. */
@@ -287,43 +334,64 @@ export function showItemDetail(tetelId) {
     .sort((a, b) => (a.datum < b.datum ? 1 : -1)).slice(0, 40);
   const lines = db.Rendeles_tetelek.filter(l => l.tetel_id === tetelId && !l.lezarva);
   const me = t.mertekegyseg || '';
+  const canKorr = store.can('raktaros'), canEdit = store.can('admin');
+  const stLabel = STATUS_TEXT[st.statusz];
   const body = html`
-    <div class="stats">
-      <div class="stat ${st.statusz === 'hiany' ? 'err' : st.statusz === 'figyelem' ? 'warn' : ''}"><div class="v">${fmtNum(st.keszlet)}</div><div class="l">Aktuális készlet (${me})</div></div>
-      <div class="stat"><div class="v">${fmtNum(t.min_keszlet)} / ${fmtNum(t.cel_keszlet)}</div><div class="l">Minimum / cél</div></div>
-      <div class="stat info"><div class="v">${fmtNum(st.uton)}</div><div class="l">Úton (rendelve)</div></div>
-      ${st.ertek && store.can('arak') ? html`<div class="stat"><div class="v">${fmtMoney(st.ertek)}</div><div class="l">Készletérték (${fmtMoney(st.egysegar)}/${me})</div></div>` : ''}
+    <div class="detail-head">
+      <div class="detail-hero st-${st.statusz}">
+        <div class="hero-label">Aktuális készlet</div>
+        <div class="hero-value">${fmtNum(st.keszlet)} <span class="hero-unit">${me}</span></div>
+        <div class="hero-status"><span class="legend-bar st-${st.statusz}"></span>${stLabel}</div>
+        <dl class="hero-levels">
+          <div><dt>Minimum</dt><dd>${fmtNum(t.min_keszlet)} <span class="muted">${me}</span></dd></div>
+          <div><dt>Cél</dt><dd>${fmtNum(t.cel_keszlet)} <span class="muted">${me}</span></dd></div>
+        </dl>
+      </div>
+      <dl class="facts">
+        <dt>Hely</dt><dd>${[t.raktar, t.polc].filter(Boolean).join(' · ') || '—'}</dd>
+        <dt>Kategória</dt><dd>${t.kategoria || '—'}</dd>
+        <dt>Úton (rendelve)</dt><dd>${st.uton ? `${fmtNum(st.uton)} ${me}` : '–'}</dd>
+        <dt>Utolsó leltár</dt><dd>${fmtDate(st.leltarDatum)}${st.leltarDatum ? html` <span class="muted">(${st.napjaLeltar} napja)</span>` : ''}${st.esedekes ? html` <span class="badge badge-warn">esedékes</span>` : ''}</dd>
+        <dt>Leltár gyakoriság</dt><dd>${t.leltar_ciklus_nap ? t.leltar_ciklus_nap + ' nap' : '—'}</dd>
+        ${st.ertek && store.can('arak') ? html`<dt>Készletérték</dt><dd>${fmtMoney(st.ertek)} <span class="muted">(${fmtMoney(st.egysegar)}/${me})</span></dd>` : ''}
+        ${t.megjegyzes ? html`<dt>Megjegyzés</dt><dd>${t.megjegyzes}</dd>` : ''}
+      </dl>
     </div>
-    <dl class="kv small">
-      <dt>Kategória</dt><dd>${t.kategoria || '—'}</dd>
-      <dt>Hely</dt><dd>${[t.raktar, t.polc].filter(Boolean).join(' · ') || '—'}</dd>
-      <dt>Utolsó leltár</dt><dd>${fmtDate(st.leltarDatum)} ${st.leltarDatum ? html`(${st.napjaLeltar} napja)` : ''} ${st.esedekes ? html`<span class="badge badge-warn">Esedékes</span>` : ''}</dd>
-      <dt>Leltár ciklus</dt><dd>${t.leltar_ciklus_nap ? t.leltar_ciklus_nap + ' nap' : '—'}</dd>
-      ${t.megjegyzes ? html`<dt>Megjegyzés</dt><dd>${t.megjegyzes}</dd>` : ''}
-    </dl>
-    ${store.can('rendeles') ? html`<h3 style="margin-top:1.25rem">Beszerzési források</h3>
-    ${src.length ? html`<div class="table-wrap"><table class="tbl small"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
-      ${src.map(f => html`<tr><td>${store.supplierName(f.beszallito_id)} ${f.elsodleges ? html`<span class="badge badge-info">elsődleges</span>` : ''}</td>
-        <td>${f.cikkszam}</td><td class="num">${fmtNum(f.kiszereles)} ${me}</td>${store.can('arak') ? html`<td class="num">${f.egysegar ? fmtMoney(f.egysegar) : '—'}</td>` : ''}
-        <td>${(u => u ? html`<a href="${u}" target="_blank" rel="noopener">Webshop ↗</a>` : '')(L.productUrl(store.get('Beszallitok', f.beszallito_id), f))}</td></tr>`)}
+    ${canKorr || canEdit ? html`<div class="detail-actions">
+      ${canEdit ? html`<button class="btn btn-sm" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
+      ${canKorr ? html`<button class="btn btn-sm" data-d="korr">Korrekció…</button>` : ''}
+    </div>` : ''}
+    ${store.can('rendeles') ? html`<h3 class="sec-h">Beszerzési források</h3>
+    ${src.length ? html`<div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
+      ${src.map(f => html`<tr><td class="c-main">${store.supplierName(f.beszallito_id)} ${f.elsodleges ? html`<span class="star-on" title="Elsődleges forrás">${ICONS.star}</span>` : ''}</td>
+        <td class="c-f1" data-l="Cikkszám">${f.cikkszam || '—'}</td><td class="num c-f2" data-l="Kiszerelés">${fmtNum(f.kiszereles)} ${me}</td>${store.can('arak') ? html`<td class="num c-f3" data-l="Egységár">${f.egysegar ? fmtMoney(f.egysegar) : '—'}</td>` : ''}
+        <td class="c-act">${(u => u ? html`<a href="${u}" target="_blank" rel="noopener">Webshop ↗</a>` : '')(L.productUrl(store.get('Beszallitok', f.beszallito_id), f))}</td></tr>`)}
     </tbody></table></div>` : html`<p class="muted small">Nincs megadva beszerzési forrás.</p>`}` : ''}
-    ${lines.length && store.can('rendeles') ? html`<h3 style="margin-top:1.25rem">Nyitott rendelések</h3><ul class="small">${lines.map(l =>
-      html`<li>${l.rendeles_id}: ${fmtNum(l.mennyiseg)} ${me} rendelve, ${fmtNum(l.beerkezett)} megérkezett</li>`)}</ul>` : ''}
-    <h3 style="margin-top:1.25rem">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40)</span></h3>
-    ${moves.length ? html`<div class="move-list">${moves.map(m => html`<div class="move">
-        ${moveIcon(m.tipus)}
-        <div class="grow"><div>${fmtDate(m.datum, true)}</div>
-          <div class="small muted">${m.bizonylat}${m.megjegyzes ? ' · ' + m.megjegyzes : ''} · ${store.userName(m.felhasznalo)}</div></div>
-        <div class="move-q mv-${m.tipus}">${moveQty(m)} <span class="small muted">${me}</span></div>
-      </div>`)}</div>
-      <div class="small muted move-legend">${Object.keys(L.MOVE_TYPES).map(k => html`<span>${moveIcon(k)} ${L.MOVE_TYPES[k]}</span>`)}</div>`
+    ${lines.length && store.can('rendeles') ? html`<h3 class="sec-h">Nyitott rendelések</h3>
+      <div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Rendelés</th><th>Beszállító</th><th class="num">Rendelt</th><th class="num">Megérkezett</th></tr></thead>
+      <tbody>${lines.map(l => { const o = store.get('Rendelesek', l.rendeles_id) || {}; return html`<tr>
+        <td class="c-main">${l.rendeles_id}${o.belso_azon ? html` <span class="muted">· ${o.belso_azon}</span>` : ''}<div class="sub">${fmtDate(o.datum)}</div></td>
+        <td class="c-act">${store.supplierName(o.beszallito_id)}</td>
+        <td class="num c-f1" data-l="Rendelt">${fmtNum(l.mennyiseg)} ${me}</td><td class="num c-f2" data-l="Megérkezett">${fmtNum(l.beerkezett)}</td></tr>`; })}</tbody></table></div>` : ''}
+    <h3 class="sec-h">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40)</span>
+      ${help(html`<b>Jelölések</b><br>${Object.keys(L.MOVE_TYPES).map(k => html`<span class="legend-row">${moveIcon(k)} ${L.MOVE_TYPES[k]}</span>`)}
+        <br>Leltárnál a megszámolt mennyiség, egyébként a mozgás mennyisége látszik; az irányt az ikon jelzi (korrekciónál előjel is).`)}</h3>
+    ${moves.length ? html`<div class="table-wrap"><table class="tbl cards nochk moves-tbl">
+      <thead><tr><th>Mennyiség</th><th>Bizonylat</th><th>Rögzítette</th><th class="num">Dátum</th></tr></thead>
+      <tbody>${moves.map(m => html`<tr>
+        <td class="c-main"><span class="move-date">${moveIcon(m.tipus)} <span class="move-q mv-${m.tipus}">${moveQty(m)}</span> <span class="small muted">${me}</span></span></td>
+        <td class="c-meta">${m.bizonylat}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}</td>
+        <td class="c-f2">${store.userName(m.felhasznalo)}</td>
+        <td class="num c-f1">${fmtDate(m.datum, true)}</td>
+      </tr>`)}</tbody></table></div>`
       : html`<p class="muted small">Még nincs mozgás.</p>`}`;
-  const actions = [{ label: 'Bezárás', value: null }];
-  if (store.can('raktaros')) actions.unshift({ label: 'Korrekció…', value: 'korr' });
-  if (store.can('admin')) actions.unshift({ label: 'Szerkesztés', value: 'edit' });
-  modal({ title: t.megnevezes, body, actions, wide: true }).done.then(v => {
-    if (v === 'korr') showCorrection(t);
-    if (v === 'edit') location.hash = '#/torzsadatok?tetel=' + encodeURIComponent(t.tetel_id);
+  const dlg = modal({ title: t.megnevezes, body, actions: [{ label: 'Bezárás', value: null }], wide: true });
+  dlg.el.addEventListener('click', e => {
+    const b = e.target.closest('[data-d]');
+    if (!b) return;
+    dlg.close();
+    if (b.dataset.d === 'korr') showCorrection(t);
+    if (b.dataset.d === 'edit') location.hash = '#/torzsadatok?tetel=' + encodeURIComponent(t.tetel_id);
   });
 }
 

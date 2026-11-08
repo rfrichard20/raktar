@@ -48,7 +48,8 @@ function compute() {
   let uton = 0;
   db.Rendeles_tetelek.forEach(l => { if (!l.lezarva) uton += Math.max(0, l.mennyiseg - l.beerkezett) * (l.egysegar || 0); });
 
-  // Rendelési költés havonta és beszállítónként
+  // Beszerzés havonta és beszállítónként – csak a TÉNYLEGESEN BEÉRKEZETT mennyiség, a beérkezés napján.
+  // (A meg nem érkezett, lezárt vagy törölt rendelés így nem torzítja a kimutatást.)
   const months = [];
   for (let i = 0; i < ui.period; i++) {
     const d = new Date(from.getFullYear(), from.getMonth() + i, 1);
@@ -57,19 +58,23 @@ function compute() {
   const byMonth = new Map(months.map(m => [m.key, m]));
   const bySup = new Map();
   let spend = 0;
-  db.Rendeles_tetelek.forEach(l => {
-    const o = store.get('Rendelesek', l.rendeles_id);
-    if (!o || o.datum < fromIso) return;
-    const v = (l.mennyiseg || 0) * (l.egysegar || 0);
-    const d = new Date(o.datum);
+  db.Mozgasok.forEach(mv => {
+    if (mv.tipus !== 'BEERKEZES' || mv.datum < fromIso) return;
+    const line = mv.rendeles_sor_id ? store.get('Rendeles_tetelek', mv.rendeles_sor_id) : null;
+    const order = line ? store.get('Rendelesek', line.rendeles_id) : null;
+    // Ár: a rendelés egységára; rendelés nélküli beérkezésnél az elsődleges forrás ára
+    const price = line && line.egysegar ? line.egysegar : (st[mv.tetel_id]?.egysegar || 0);
+    const v = (mv.mennyiseg || 0) * price;
+    if (!v) return;
+    const d = new Date(mv.datum);
     const m = byMonth.get(`${d.getFullYear()}-${d.getMonth()}`);
-    if (m) { m.value += v; m.orders.add(o.rendeles_id); }
-    const name = store.supplierName(o.beszallito_id);
-    const g = bySup.get(name) || { label: name, value: 0, n: 0 };
-    g.value += v; bySup.set(name, g);
+    if (m) { m.value += v; m.orders.add(mv.bizonylat || mv.mozgas_id); }
+    const name = order ? store.supplierName(order.beszallito_id) : 'Rendelés nélküli beérkezés';
+    const g = bySup.get(name) || { label: name, value: 0, n: 0, docs: new Set() };
+    g.value += v; g.docs.add(mv.bizonylat || mv.mozgas_id); g.n = g.docs.size;
+    bySup.set(name, g);
     spend += v;
   });
-  db.Rendelesek.forEach(o => { if (o.datum >= fromIso) { const g = bySup.get(store.supplierName(o.beszallito_id)); if (g) g.n++; } });
 
   // Felhasználás (leltárakból becsülve)
   const usage = L.usageStats(db, fromIso);
@@ -105,9 +110,9 @@ function columns(months) {
   const max = niceMax(Math.max(...months.map(m => m.value), 0));
   const ticks = [0, max / 2, max];
   const peak = months.reduce((a, m) => (m.value > a.value ? m : a), months[0]);
-  return html`<div class="cols-chart" role="img" aria-label="Rendelési költés havonta">
+  return html`<div class="cols-chart" role="img" aria-label="Beérkezett beszerzés havonta">
     <div class="cols-grid" aria-hidden="true">${ticks.slice().reverse().map(t => html`<div class="cols-tick"><span>${t ? compactFt(t) : '0'}</span></div>`)}</div>
-    <div class="cols ${months.length > 6 ? 'dense' : ''}">${months.map(m => html`<div class="col" data-tip="${m.label} ${m.year}\n${fmtMoney(m.value)}${m.orders.size ? ` · ${m.orders.size} rendelés` : ''}">
+    <div class="cols ${months.length > 6 ? 'dense' : ''}">${months.map(m => html`<div class="col" data-tip="${m.label} ${m.year}\n${fmtMoney(m.value)}${m.orders.size ? ` · ${m.orders.size} szállítás` : ''}">
         <div class="col-bar-wrap">${m === peak && m.value ? html`<span class="col-peak">${compactFt(m.value)}</span>` : ''}
           <div class="col-bar" style="height:${m.value / max * 100}%"></div></div>
         <span class="col-label">${m.label}</span></div>`)}</div>
@@ -128,18 +133,18 @@ function usageTable(rows) {
   }
   const fed = r => (r.fedezet === Infinity ? 'nem fogy' : r.fedezet > 36 ? '> 3 év' : r.fedezet >= 1 ? `~${fmtNum(Math.round(r.fedezet))} hó` : r.havi > 0 ? '< 1 hó' : '–');
   return html`<p class="small muted card-note">${note}</p>
-    ${list.length ? html`<div class="table-wrap"><table class="tbl responsive">
+    ${list.length ? html`<div class="table-wrap"><table class="tbl cards nochk flow">
       <thead><tr><th>Tétel</th>${ui.usage === 'tobblet' ? html`<th class="num">Többlet</th>` : html`<th class="num">Felhasználás</th><th class="num">Havi átlag</th>`}
         <th class="num">Készlet</th><th class="num">Elég kb.</th><th class="num">${ui.usage === 'allo' ? 'Készletérték' : 'Érték'}</th></tr></thead>
       <tbody>${list.slice(0, 15).map(r => html`<tr class="click" data-id="${r.t.tetel_id}">
-        <td class="main">${r.t.megnevezes}<div class="small muted">${r.t.kategoria}</div></td>
+        <td class="c-main">${r.t.megnevezes}<div class="sub">${r.t.kategoria}</div></td>
         ${ui.usage === 'tobblet' ? html`<td class="num" data-l="Többlet">+${fmtNum(r.u.tobblet)} ${r.t.mertekegyseg}</td>`
           : html`<td class="num" data-l="Felhasználás">${fmtNum(Math.round(r.u.fogyas))} ${r.t.mertekegyseg}</td><td class="num" data-l="Havi átlag">${fmtNum(Math.round(r.havi * 10) / 10)}</td>`}
         <td class="num" data-l="Készlet">${fmtNum(r.s.keszlet)}</td>
         <td class="num" data-l="Elég kb.">${fed(r)}</td>
         <td class="num" data-l="Érték">${fmtMoney(ui.usage === 'allo' ? r.s.ertek : ui.usage === 'tobblet' ? r.u.tobblet * (r.s.egysegar || 0) : r.ertekFogyas)}</td>
       </tr>`)}</tbody></table></div>
-      ${list.length > 15 ? html`<div class="small muted" style="padding:.5rem .75rem">+ ${list.length - 15} további tétel</div>` : ''}`
+      ${list.length > 15 ? html`<div class="tbl-foot">+ ${list.length - 15} további tétel</div>` : ''}`
       : html`<div class="empty small">Nincs ilyen tétel a választott időszakban.</div>`}`;
 }
 
@@ -173,17 +178,17 @@ export default {
         <div class="report-section-head"><h2>Időszak</h2><span class="sub">${d.months[0].label} ${d.months[0].year} – ma</span>
           ${seg('period', [[3, '3 hónap'], [6, '6 hónap'], [12, '12 hónap']])}</div>
         <div class="stats">
-          <div class="stat"><div class="v">${compactFt(d.spend)}</div><div class="l">Rendelési költés</div></div>
+          <div class="stat"><div class="v">${compactFt(d.spend)}</div><div class="l" title="Csak a ténylegesen beérkezett mennyiség, a beérkezés napján">Beérkezett beszerzés</div></div>
           <div class="stat"><div class="v">${compactFt(d.usageValue)}</div><div class="l">Becsült felhasználás</div></div>
         </div>
         <div class="report-grid">
           <div class="card">
-            <div class="card-head"><h2 class="grow">Rendelési költés havonta</h2></div>
+            <div class="card-head"><h2 class="grow">Beérkezett beszerzés havonta</h2></div>
             <div class="card-pad">${columns(d.months)}</div>
           </div>
           <div class="card">
-            <div class="card-head"><h2 class="grow">Rendelési költés beszállítónként</h2></div>
-            <div class="card-pad">${hbars(d.bySup.map(g => ({ ...g, unitN: 'rendelés' })), d.spend)}</div>
+            <div class="card-head"><h2 class="grow">Beérkezett beszerzés beszállítónként</h2></div>
+            <div class="card-pad">${hbars(d.bySup.map(g => ({ ...g, unitN: 'szállítás' })), d.spend)}</div>
           </div>
         </div>
         <div class="card" style="margin-top:1rem">

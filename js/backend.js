@@ -81,7 +81,7 @@ class DemoBackend {
     const now = new Date().toISOString();
     const results = ops.map(op => {
       try { L.applyOp(this.db, op, user, now); return { op_id: op.op_id, ok: true }; }
-      catch (e) { if (!e.validation) throw e; return { op_id: op.op_id, ok: false, error: e.message }; }
+      catch (e) { return { op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba: ' + e.message }; }
     });
     await this.save();
     return { ok: true, results, user, data: this.snapshot(user) };

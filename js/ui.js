@@ -23,19 +23,24 @@ const numFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 2 });
 const moneyFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 0 });
 export const fmtNum = n => (n == null || n === '' ? '–' : numFmt.format(n));
 export const fmtMoney = n => moneyFmt.format(Math.round(n || 0)) + ' Ft';
+/* Dátumok – minden formázás ezekből a segédekből megy, egységes alakban */
+const p2 = n => String(n).padStart(2, '0');
+/** Helyi dátum ÉÉÉÉ{sep}HH{sep}NN alakban (pl. bizonylatszámhoz '' elválasztóval). */
+const ymd = (d, sep) => `${d.getFullYear()}${sep}${p2(d.getMonth() + 1)}${sep}${p2(d.getDate())}`;
+/** Óra:perc (pl. „Szinkronban · 14:05”). */
+export const fmtTime = d => `${p2(d.getHours())}:${p2(d.getMinutes())}`;
 export function fmtDate(iso, withTime) {
   if (!iso) return '–';
   const d = new Date(iso);
   if (isNaN(d)) return '–';
-  const p = n => String(n).padStart(2, '0');
-  let s = `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}.`;
-  if (withTime) s += ` ${p(d.getHours())}:${p(d.getMinutes())}`;
-  return s;
+  return `${ymd(d, '.')}.` + (withTime ? ' ' + fmtTime(d) : '');
 }
-export function todayInput() {
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+/** Mai dátum bizonylatszámhoz: ÉÉÉÉHHNN. */
+export const dateStamp = (d = new Date()) => ymd(d, '');
+/** Mai dátum dátummezőhöz: ÉÉÉÉ-HH-NN. */
+export const todayInput = () => ymd(new Date(), '-');
+/** Rendezett oszlop jelölése a fejlécben. */
+export const sortArrow = (active, dir) => (active ? (dir > 0 ? ' ▲' : ' ▼') : '');
 /** Dátum mező (ÉÉÉÉ-HH-NN) → ISO; ha ma van, a pontos időt használja. */
 export function dateInputToIso(v) {
   if (!v || v === todayInput()) return new Date().toISOString();
@@ -51,9 +56,18 @@ export function parseNum(v) {
 export function norm(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
-export function debounce(fn, ms) {
-  let t;
-  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+/**
+ * Kereső szűrő: matcher('csavar 4x') → szöveg => igaz, ha a keresés minden szava szerepel benne
+ * (kis- és nagybetű, ékezet nem számít). Üres keresésre mindig igaz.
+ */
+export function matcher(q) {
+  const words = norm(q).split(/\s+/).filter(Boolean);
+  return text => { const hay = norm(text); return words.every(w => hay.includes(w)); };
+}
+/** Rendezéshez: számokat számként, minden mást magyar ábécé szerint hasonlít. */
+export function compare(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a ?? '').localeCompare(String(b ?? ''), 'hu');
 }
 
 /* ---------- Értesítés ---------- */
@@ -92,20 +106,53 @@ export function modal({ title, body, actions = [], wide = false, onMount }) {
     document.removeEventListener('keydown', onKey);
     resolve(val);
   };
-  const onKey = e => { if (e.key === 'Escape') close(null); };
+  // Módosított űrlap: a felhasználó által átírt (name attribútumos) mező után
+  // a mentés nélküli bezárás (✕, háttér, Esc, Mégse) megerősítést kér.
+  let dirty = false, asking = false, busy = false;
+  const markDirty = e => { if (e.isTrusted && e.target.name && e.target.closest('.modal-body')) dirty = true; };
+  back.addEventListener('input', markDirty);
+  back.addEventListener('change', markDirty);
+  const cancel = async (val = null) => {
+    if (dirty) {
+      if (asking) return;
+      asking = true;
+      const ok = await confirmDialog('Elveted a módosításokat?', 'A beírt adatok nincsenek mentve, bezáráskor elvesznek.', 'Elvetés', 'danger');
+      asking = false;
+      if (!ok) return;
+    }
+    close(val);
+  };
+  // Esc csak a legfelső ablakra hat (megerősítő ablak nyitva lehet felette)
+  // (nyitott legördülő / találati lista esetén az Esc csak azt zárja be)
+  const onKey = e => {
+    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-back')].pop() !== back) return;
+    if (document.querySelector('.popover') || back.querySelector('.picker-list')) return;
+    cancel(null);
+  };
   document.addEventListener('keydown', onKey);
+  // Csak akkor zár a háttérre kattintás, ha a lenyomás is a háttéren kezdődött
+  // (különben egy beviteli mezőben kezdett, az ablakon kívül elengedett kijelölés bezárná).
+  let downOnBack = false;
+  back.addEventListener('pointerdown', e => { downOnBack = e.target === back; });
   back.addEventListener('click', async e => {
-    if (e.target === back || e.target.closest('[data-close]')) return close(null);
+    if (e.target === back) { if (downOnBack) cancel(null); downOnBack = false; return; }
+    if (e.target.closest('[data-close]')) return cancel(null);
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const a = actions[Number(b.dataset.act)];
     // Figyelem: a value lehet null / false (pl. Mégse) – ezt nem szabad „igen”-re cserélni
     const val = 'value' in a ? a.value : true;
     if (a.onClick) {
-      const r = await a.onClick(back);
+      // Dupla kattintás / koppintás ellen: amíg az előző mentés fut, a gombok nem indítanak újat
+      // (különben pl. egy korrekció vagy rendelés kétszer kerülne rögzítésre)
+      if (busy) return;
+      busy = true;
+      let r;
+      try { r = await a.onClick(back); } finally { busy = false; }
       if (r === false) return; // validációs hiba: maradjon nyitva
       close(r === undefined ? val : r);
-    } else close(val);
+    } else if (val === null || val === false) cancel(val);
+    else close(val);
   });
   const el = back.querySelector('.modal');
   if (onMount) onMount(el, close);
@@ -207,7 +254,8 @@ export function help(text) {
   return html`<span class="help"><button type="button" class="help-btn" aria-label="Súgó" data-help>?</button><span class="help-pop" role="tooltip">${text}</span></span>`;
 }
 
-export const STATUS_LABEL ={ hiany: 'Hiány', figyelem: 'Fogyóban', ok: 'Rendben' };
+/** Készletállapot szövege (adatlap, sorjelölő súgója) – egy helyen. */
+export const STATUS_TEXT = { hiany: 'Hiány – a minimum alatt', figyelem: 'Fogyóban – közel a minimumhoz', ok: 'Rendben' };
 export const ORDER_STATUS = {
   nyitott: ['Nyitott', 'info'], reszben: ['Részben érkezett', 'warn'],
   teljesitve: ['Teljesítve', 'ok'], lezarva: ['Lezárva', 'muted'],

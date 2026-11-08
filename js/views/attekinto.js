@@ -1,7 +1,7 @@
 // Áttekintő: készlet táblázat szűrőkkel.
 import * as store from '../store.js';
-import { html, fmtNum, fmtDate, fmtMoney, norm } from '../ui.js';
-import { statusBadge, showItemDetail } from './common.js';
+import { html, fmtNum, fmtDate, fmtMoney, norm, help, matcher, sortArrow, STATUS_TEXT } from '../ui.js';
+import { showItemDetail } from './common.js';
 
 const ui = { q: '', cat: '', wh: '', filter: '', sort: 'polc', dir: 1 };
 
@@ -14,20 +14,18 @@ const FILTERS = {
   esedekes: ['Esedékes leltár', (t, s) => s.esedekes],
 };
 
+// [kulcs, fejléc, osztály, szélesség]
 const COLS = [
-  ['megnevezes', 'Megnevezés'], ['polc', 'Hely'], ['keszlet', 'Készlet', 'num'], ['min', 'Min.', 'num'],
-  ['cel', 'Cél', 'num'], ['uton', 'Úton', 'num'], ['leltar', 'Utolsó leltár'], ['statusz', 'Állapot'],
+  ['megnevezes', 'Megnevezés', '', ''], ['polc', 'Hely', '', '16%'], ['keszlet', 'Készlet', 'num', '11%'],
+  ['min', 'Min. / cél', 'num m-hide', '12%'], ['uton', 'Úton', 'num', '8%'], ['leltar', 'Utolsó leltár', '', '13%'],
 ];
-const STATUS_ORDER = { hiany: 0, figyelem: 1, ok: 2 };
 
 function sortVal(t, s, key) {
   switch (key) {
     case 'keszlet': return s.keszlet;
     case 'min': return t.min_keszlet;
-    case 'cel': return t.cel_keszlet;
     case 'uton': return s.uton;
     case 'leltar': return s.leltarDatum || '';
-    case 'statusz': return STATUS_ORDER[s.statusz];
     case 'polc': return (t.raktar || '~') + ' ' + (t.polc || '~') + ' ' + norm(t.megnevezes);
     default: return norm(t.megnevezes);
   }
@@ -35,12 +33,12 @@ function sortVal(t, s, key) {
 
 function rows() {
   const stock = store.state.stock;
-  const words = norm(ui.q).split(/\s+/).filter(Boolean);
+  const match = matcher(ui.q);
   const f = FILTERS[ui.filter][1];
   return store.activeItems()
     .filter(t => !ui.cat || t.kategoria === ui.cat)
     .filter(t => !ui.wh || t.raktar === ui.wh)
-    .filter(t => { const hay = norm(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`); return words.every(w => hay.includes(w)); })
+    .filter(t => match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
     .filter(t => f(t, stock[t.tetel_id]))
     .sort((a, b) => {
       const x = sortVal(a, stock[a.tetel_id], ui.sort), y = sortVal(b, stock[b.tetel_id], ui.sort);
@@ -64,19 +62,17 @@ function statsHtml() {
 
 function bodyHtml(list) {
   const st = store.state.stock;
-  if (!list.length) return html`<tr><td colspan="8" class="empty">Nincs a szűrésnek megfelelő tétel.</td></tr>`;
+  if (!list.length) return html`<tr><td colspan="6" class="empty">Nincs a szűrésnek megfelelő tétel.</td></tr>`;
   return html`${list.map(t => {
     const s = st[t.tetel_id];
     const me = t.mertekegyseg;
-    return html`<tr class="click ${s.statusz === 'hiany' ? 'row-err' : s.statusz === 'figyelem' ? 'row-warn' : ''}" data-id="${t.tetel_id}">
-      <td class="main">${t.megnevezes}<div class="small muted">${t.kategoria}</div></td>
-      <td data-l="Hely">${store.placeLabel(t)}</td>
-      <td class="num" data-l="Készlet"><b>${fmtNum(s.keszlet)}</b> <span class="muted small">${me}</span></td>
-      <td class="num m-hide">${fmtNum(t.min_keszlet)}</td>
-      <td class="num m-hide">${fmtNum(t.cel_keszlet)}</td>
-      <td class="num" data-l="Úton">${s.uton ? fmtNum(s.uton) : html`<span class="muted">–</span>`}</td>
-      <td class="nowrap" data-l="Leltár">${fmtDate(s.leltarDatum)} ${s.esedekes ? html`<span class="badge badge-warn">esedékes</span>` : ''}</td>
-      <td>${statusBadge(s)}</td>
+    return html`<tr class="click st-row-${s.statusz}" data-id="${t.tetel_id}" ${s.statusz !== 'ok' ? html`title="${STATUS_TEXT[s.statusz]}"` : ''}>
+      <td class="c-main">${t.megnevezes}<div class="sub">${t.kategoria}</div></td>
+      <td class="c-meta small-m">${store.placeLabel(t)}</td>
+      <td class="num c-f1" data-l="Készlet"><b>${fmtNum(s.keszlet)}</b> <span class="muted small">${me}</span></td>
+      <td class="num m-hide">${fmtNum(t.min_keszlet)} / ${fmtNum(t.cel_keszlet)}</td>
+      <td class="num c-f2" data-l="Úton">${s.uton ? fmtNum(s.uton) : html`<span class="muted">–</span>`}</td>
+      <td class="nowrap c-f3" data-l="Leltár">${fmtDate(s.leltarDatum)}${s.esedekes ? html` <span class="due-dot" title="Esedékes leltár" aria-label="Esedékes leltár"></span>` : ''}</td>
     </tr>`;
   })}`;
 }
@@ -88,7 +84,7 @@ function update(root) {
   const value = !store.can('arak') ? 0 : list.reduce((a, t) => a + (store.state.stock[t.tetel_id].ertek || 0), 0);
   root.querySelector('#count').innerHTML = `${list.length} tétel` + (value ? ` · <span title="Aktuális készlet × elsődleges beszerzési ár">készletérték: <b>${fmtMoney(value)}</b></span>` : '');
   root.querySelectorAll('th[data-sort]').forEach(th => {
-    th.querySelector('.arrow').textContent = th.dataset.sort === ui.sort ? (ui.dir > 0 ? ' ▲' : ' ▼') : '';
+    th.querySelector('.arrow').textContent = sortArrow(th.dataset.sort === ui.sort, ui.dir);
   });
 }
 
@@ -103,7 +99,7 @@ export default {
     }
     root.dataset.view = 'attekinto';
     root.innerHTML = String(html`
-      <div class="page-head"><h1>Készlet áttekintő</h1></div>
+      <div class="page-head"><h1>Készlet áttekintő</h1>${help(html`<b>Jelölések</b><br><span class="legend-bar st-hiany"></span> piros csík: hiány – a készlet a minimum alatt<br><span class="legend-bar st-figyelem"></span> sárga csík: fogyóban – közel a minimumhoz<br><span class="due-dot"></span> esedékes leltár (lejárt a leltári ciklus)<br><br>A felső számlálókra kattintva szűrhetsz; a sorra kattintva megnyílik a tétel adatlapja.`)}</div>
       <div class="stats" id="stats"></div>
       <div class="card">
         <div class="card-head">
@@ -115,7 +111,8 @@ export default {
           <span class="muted small" id="count"></span>
         </div>
         <div class="table-wrap">
-          <table class="tbl responsive">
+          <table class="tbl cards fixed overview nochk">
+            <colgroup>${COLS.map(c => html`<col class="${c[2].includes('m-hide') ? 'm-hide' : ''}" ${c[3] ? html`style="width:${c[3]}"` : ''}>`)}</colgroup>
             <thead><tr>${COLS.map(([k, l, cls]) => html`<th class="sortable ${cls || ''}" data-sort="${k}">${l}<span class="arrow"></span></th>`)}</tr></thead>
             <tbody id="tbody"></tbody>
           </table>

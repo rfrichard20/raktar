@@ -4,8 +4,8 @@
   "start_url": "./#/attekinto",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f4f5f7",
-  "theme_color": "#ed1c24",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "lang": "hu",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },

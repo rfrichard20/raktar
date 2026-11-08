@@ -9,8 +9,8 @@ var RaktarLogic = (function () {
   var ROLES = { olvaso: 1, szerelo: 2, raktaros: 3, admin: 4 };
   var ROLE_LABELS = { admin: 'Admin', raktaros: 'Raktáros', szerelo: 'Szerelő', olvaso: 'Olvasó' };
   var MOVE_TYPES = { LELTAR: 'Leltár', BEERKEZES: 'Beérkezés', KIVET: 'Kivét', KORREKCIO: 'Korrekció' };
-  var EDITABLE = { Tetelek: 1, Beszallitok: 1, Forrasok: 1, Felhasznalok: 1, Listak: 1 };
-  var DELETABLE = { Forrasok: 1, Listak: 1 };
+  var EDITABLE = { Tetelek: 1, Beszallitok: 1, Forrasok: 1, Felhasznalok: 1, Listak: 1, Email_sablonok: 1 };
+  var DELETABLE = { Forrasok: 1, Listak: 1, Email_sablonok: 1 };
   var LIST_TYPES = { kategoria: 'Kategóriák', mertekegyseg: 'Mértékegységek', raktar: 'Raktárak' };
   var LIST_FIELD = { kategoria: 'kategoria', mertekegyseg: 'mertekegyseg', raktar: 'raktar' };
 
@@ -24,7 +24,7 @@ var RaktarLogic = (function () {
     Beszallitok: { key: 'beszallito_id', cols: [
       ['beszallito_id', 'str'], ['nev', 'str'], ['kapcsolattarto', 'str'], ['email', 'str'],
       ['telefon', 'str'], ['weboldal', 'str'], ['aktiv', 'bool'], ['megjegyzes', 'str'], ['modositva', 'date'],
-      ['rendeles_mod', 'str'], ['kereso_url', 'str']] },
+      ['rendeles_mod', 'str'], ['kereso_url', 'str'], ['email_sablon', 'str']] },
     Forrasok: { key: 'forras_id', cols: [
       ['forras_id', 'str'], ['tetel_id', 'str'], ['beszallito_id', 'str'], ['cikkszam', 'str'],
       ['kiszereles', 'num'], ['egysegar', 'num'], ['link', 'str'], ['elsodleges', 'bool'],
@@ -35,7 +35,8 @@ var RaktarLogic = (function () {
       ['megjegyzes', 'str']] },
     Rendelesek: { key: 'rendeles_id', cols: [
       ['rendeles_id', 'str'], ['datum', 'date'], ['beszallito_id', 'str'], ['lezarva', 'bool'],
-      ['letrehozta', 'str'], ['megjegyzes', 'str'], ['modositva', 'date']] },
+      ['letrehozta', 'str'], ['megjegyzes', 'str'], ['modositva', 'date'],
+      ['belso_azon', 'str']] }, // belső azonosító, pl. MiniCRM
     Rendeles_tetelek: { key: 'sor_id', cols: [
       ['sor_id', 'str'], ['rendeles_id', 'str'], ['tetel_id', 'str'], ['forras_id', 'str'],
       ['cikkszam', 'str'], ['mennyiseg', 'num'], ['egysegar', 'num'], ['beerkezett', 'num'],
@@ -43,6 +44,9 @@ var RaktarLogic = (function () {
     // Választólisták a tétel űrlapokhoz: tipus = kategoria | mertekegyseg | raktar
     Listak: { key: 'lista_id', cols: [
       ['lista_id', 'str'], ['tipus', 'str'], ['ertek', 'str'], ['sorrend', 'num'], ['modositva', 'date']] },
+    // E-mail sablonok: tipus = rendeles | ajanlat; a szövegben {mezo} helyőrzők (lásd EMAIL_FIELDS)
+    Email_sablonok: { key: 'sablon_id', cols: [
+      ['sablon_id', 'str'], ['nev', 'str'], ['tipus', 'str'], ['targy', 'str'], ['szoveg', 'str'], ['modositva', 'date']] },
     // Leltár sablon: tetelek = vesszővel elválasztott tétel azonosítók
     Leltar_sablonok: { key: 'sablon_id', cols: [
       ['sablon_id', 'str'], ['nev', 'str'], ['tetelek', 'str'], ['letrehozta', 'str'], ['modositva', 'date']] },
@@ -167,6 +171,7 @@ var RaktarLogic = (function () {
   function filterSnapshot(db, user) {
     var out = exportDb(db);
     if (!can(user, 'rendeles')) {
+      out.Email_sablonok = [];
       out.Beszallitok = [];
       out.Forrasok = [];
       out.Rendelesek = [];
@@ -200,6 +205,14 @@ var RaktarLogic = (function () {
       case 'mozgasok': opMozgasok(db, op, user, nowIso, changes); break;
       case 'rendeles': opRendeles(db, op, user, nowIso, changes); break;
       case 'rendeles_lezaras': opLezaras(db, op, user, nowIso, changes); break;
+      case 'rendeles_torles': opRendelesTorles(db, op, user, changes); break;
+      case 'rendeles_adat':
+        // Belső azonosító és megjegyzés utólagos módosítása
+        need(user, 'raktaros');
+        if (!get(db, 'Rendelesek', op.rendeles_id)) fail('Ismeretlen rendelés.');
+        put(db, 'Rendelesek', { rendeles_id: op.rendeles_id, belso_azon: String(op.belso_azon || '').trim().slice(0, 200),
+          megjegyzes: String(op.megjegyzes || '').trim().slice(0, 2000), modositva: nowIso }, changes);
+        break;
       case 'mentes': opMentes(db, op, user, nowIso, changes); break;
       case 'torles': opTorles(db, op, user, changes); break;
       case 'uj_tetel': opUjTetel(db, op, user, nowIso, changes); break;
@@ -274,8 +287,12 @@ var RaktarLogic = (function () {
     var sorok = (op.sorok || []).map(function (s) { return normalize('Rendeles_tetelek', s); });
     if (!sorok.length) fail('A rendelés nem tartalmaz tételt.');
     if (o.beszallito_id && !get(db, 'Beszallitok', o.beszallito_id)) fail('Ismeretlen beszállító.');
+    var sorIds = {};
     sorok.forEach(function (s) {
       if (!s.sor_id) fail('Hiányzó rendelési sor azonosító.');
+      // Ütköző azonosító ne írhasson felül egy másik rendeléshez tartozó sort
+      if (get(db, 'Rendeles_tetelek', s.sor_id) || sorIds[s.sor_id]) fail('Ismétlődő rendelési sor azonosító.');
+      sorIds[s.sor_id] = 1;
       var t = get(db, 'Tetelek', s.tetel_id);
       if (!t) fail('Ismeretlen tétel: ' + s.tetel_id);
       if (s.mennyiseg <= 0) fail('A rendelt mennyiségnek pozitívnak kell lennie (' + t.megnevezes + ').');
@@ -309,6 +326,20 @@ var RaktarLogic = (function () {
     });
   }
 
+  /** Téves / feleslegessé vált rendelés törlése – csak ha még semmi nem érkezett belőle. */
+  function opRendelesTorles(db, op, user, changes) {
+    need(user, 'raktaros');
+    var o = get(db, 'Rendelesek', op.rendeles_id);
+    if (!o) return; // már törölve
+    var lines = (db.Rendeles_tetelek || []).filter(function (s) { return s.rendeles_id === o.rendeles_id; });
+    var ids = {};
+    lines.forEach(function (s) { ids[s.sor_id] = 1; });
+    var received = (db.Mozgasok || []).some(function (m) { return m.rendeles_sor_id && ids[m.rendeles_sor_id]; });
+    if (received) fail('Ebből a rendelésből már érkezett áru, ezért nem törölhető – csak lezárható.');
+    lines.forEach(function (s) { remove(db, 'Rendeles_tetelek', s.sor_id, changes); });
+    remove(db, 'Rendelesek', o.rendeles_id, changes);
+  }
+
   function opMentes(db, op, user, now, changes) {
     need(user, 'admin');
     var table = op.table;
@@ -327,6 +358,10 @@ var RaktarLogic = (function () {
       if (!get(db, 'Tetelek', r.tetel_id)) fail('Ismeretlen tétel.');
       if (!get(db, 'Beszallitok', r.beszallito_id)) fail('Válassz beszállítót.');
       if (r.kiszereles <= 0) r.kiszereles = 1;
+    } else if (table === 'Email_sablonok') {
+      if (!r.nev) fail('A sablon neve kötelező.');
+      if (r.tipus !== 'rendeles' && r.tipus !== 'ajanlat') fail('Érvénytelen sablontípus.');
+      if (!r.szoveg) fail('A sablon szövege nem lehet üres.');
     } else if (table === 'Listak') {
       if (!LIST_TYPES[r.tipus]) fail('Ismeretlen lista típus.');
       if (!r.ertek) fail('Az érték nem lehet üres.');
@@ -369,6 +404,7 @@ var RaktarLogic = (function () {
     if (op.forras && op.forras.beszallito_id) {
       f = normalize('Forrasok', op.forras);
       if (!f.forras_id) fail('Hiányzó forrás azonosító.');
+      if (get(db, 'Forrasok', f.forras_id)) fail('Ismétlődő forrás azonosító.'); // más tétel forrását ne írja felül
       if (!get(db, 'Beszallitok', f.beszallito_id)) fail('Ismeretlen beszállító.');
       f.tetel_id = t.tetel_id;
       f.elsodleges = true;
@@ -536,6 +572,91 @@ var RaktarLogic = (function () {
     });
     used.sort(function (a, b) { return String(a).localeCompare(String(b), 'hu'); });
     return own.concat(used);
+  }
+
+  /**
+   * Leltárak (bizonylatonként) és egy leltár részletei.
+   * A „nyilvántartott” érték a mozgásnapló visszajátszásából jön: mennyi volt a gép szerint a leltár pillanatában.
+   */
+  function sortedMoves(db) {
+    return (db.Mozgasok || []).slice().sort(function (a, b) {
+      if (a.datum !== b.datum) return a.datum < b.datum ? -1 : 1;
+      return a.rogzitve < b.rogzitve ? -1 : a.rogzitve > b.rogzitve ? 1 : 0;
+    });
+  }
+  function inventorySessions(db) {
+    var map = {}, cur = {}, seen = {};
+    // Egy végigjátszás: leltáronként a tételszám és az eltérő tételek száma
+    sortedMoves(db).forEach(function (m) {
+      var id = m.tetel_id, q = toNum(m.mennyiseg), c = cur[id] || 0;
+      if (m.tipus === 'LELTAR') {
+        var k = m.bizonylat || '(bizonylat nélkül)';
+        var s = map[k] = map[k] || { bizonylat: k, n: 0, elteres: 0, tol: m.datum, ig: m.datum, rogzitve: m.rogzitve, kik: {}, utolag: false };
+        s.n++;
+        if (seen[id] && round3(q - c) !== 0) s.elteres++;
+        if (m.datum < s.tol) s.tol = m.datum;
+        if (m.datum > s.ig) s.ig = m.datum;
+        if (m.rogzitve > s.rogzitve) s.rogzitve = m.rogzitve;
+        if (m.megjegyzes === 'Utólag rögzített leltár') s.utolag = true;
+        s.kik[m.felhasznalo] = 1;
+        cur[id] = q;
+      } else if (m.tipus === 'BEERKEZES' || m.tipus === 'KORREKCIO') cur[id] = c + q;
+      else if (m.tipus === 'KIVET') cur[id] = c - q;
+      seen[id] = 1;
+    });
+    return Object.keys(map).map(function (k) { var s = map[k]; s.kik = Object.keys(s.kik); return s; })
+      .sort(function (a, b) { return a.ig < b.ig ? 1 : -1; });
+  }
+  function inventoryDetails(db, bizonylat) {
+    var cur = {}, seen = {}, rows = [];
+    sortedMoves(db).forEach(function (m) {
+      var id = m.tetel_id, q = toNum(m.mennyiseg), c = cur[id] || 0;
+      if (m.tipus === 'LELTAR') {
+        if ((m.bizonylat || '(bizonylat nélkül)') === bizonylat) {
+          rows.push({ tetel_id: id, datum: m.datum, felhasznalo: m.felhasznalo, rogzitve: m.rogzitve, megjegyzes: m.megjegyzes,
+            mennyiseg: q, elotte: seen[id] ? round3(c) : null, elteres: seen[id] ? round3(q - c) : null });
+        }
+        cur[id] = q;
+      } else if (m.tipus === 'BEERKEZES' || m.tipus === 'KORREKCIO') cur[id] = c + q;
+      else if (m.tipus === 'KIVET') cur[id] = c - q;
+      seen[id] = 1;
+    });
+    return rows;
+  }
+
+  /* ---------- E-mail sablonok ---------- */
+  var EMAIL_TYPES = { rendeles: 'Megrendelés', ajanlat: 'Ajánlatkérés' };
+  var EMAIL_FIELDS = {
+    beszallito: 'a beszállító neve', kapcsolattarto: 'a kapcsolattartó teljes neve (ha nincs: „Partnerünk”)',
+    keresztnev: 'a kapcsolattartó keresztneve (tegezéshez)', tetelek: 'a tétellista, soronként egy tétel',
+    rendelesszam: 'a rendelés azonosítója', belso_azon: 'a rendelés belső azonosítója (pl. MiniCRM)', datum: 'a mai dátum', felado: 'a bejelentkezett felhasználó neve',
+    felado_email: 'a bejelentkezett felhasználó e-mail-címe'
+  };
+  /** Beépített alapsablonok – akkor is használhatók, ha még nincs saját sablon a táblában. */
+  var DEFAULT_EMAIL_TEMPLATES = [
+    { sablon_id: 'E-HIVATALOS', nev: 'Megrendelés – hivatalos', tipus: 'rendeles', targy: 'Megrendelés – {rendelesszam}',
+      szoveg: 'Tisztelt {kapcsolattarto}!\n\nAz alábbi tételeket szeretnénk megrendelni:\n\n{tetelek}\n\nRendelésszámunk: {rendelesszam}\n' +
+        'Kérjük, visszaigazolásukban jelezzék a várható szállítási időt.\n\nKöszönjük!\n\nÜdvözlettel:\n{felado}' },
+    { sablon_id: 'E-TEGEZO', nev: 'Megrendelés – tegező', tipus: 'rendeles', targy: 'Rendelés – {rendelesszam}',
+      szoveg: 'Szia {keresztnev}!\n\nKérlek, küldjétek az alábbiakat:\n\n{tetelek}\n\nRendelésszám: {rendelesszam}\n\nKöszi!\n{felado}' },
+    { sablon_id: 'E-AJANLAT', nev: 'Ajánlatkérés', tipus: 'ajanlat', targy: 'Ajánlatkérés – {datum}',
+      szoveg: 'Tisztelt {kapcsolattarto}!\n\nAz alábbi tételekre szeretnénk árajánlatot kérni:\n\n{tetelek}\n\n' +
+        'Kérjük, ajánlatukban tüntessék fel az egységárakat és a szállítási határidőt.\n\nKöszönjük!\n\nÜdvözlettel:\n{felado}' }
+  ];
+  /** A használható sablonok: a táblában lévők, vagy ha ott nincs egy sem, a beépítettek. */
+  function emailTemplates(db) {
+    var own = (db.Email_sablonok || []).filter(function (s) { return s.nev && s.szoveg; });
+    return own.length ? own : DEFAULT_EMAIL_TEMPLATES;
+  }
+  /** Tétellista e-mailhez: soronként egy tétel – bármilyen betűtípussal olvasható marad. */
+  function emailItemList(lines) {
+    return lines.map(function (l, i) {
+      return (i + 1) + '. ' + l.megnevezes + ' — ' + l.qText + (l.cikkszam ? ' (cikkszám: ' + l.cikkszam + ')' : '');
+    }).join('\n');
+  }
+  /** Sablon kitöltése: {mezo} → érték. Az ismeretlen mezők változatlanok maradnak. */
+  function fillTemplate(text, vals) {
+    return String(text || '').replace(/\{([a-z_]+)\}/g, function (m, k) { return vals[k] != null ? vals[k] : m; });
   }
 
   /** Rendelési mód: ha nincs megadva, weboldallal webshop, anélkül e-mail. */
@@ -762,6 +883,11 @@ var RaktarLogic = (function () {
         });
       }
     }
+    // E-mail sablonok (a beépítettek másolata); az e-mailes beszállítóval tegeződünk
+    db.Email_sablonok = DEFAULT_EMAIL_TEMPLATES.map(function (s) {
+      return { sablon_id: s.sablon_id, nev: s.nev, tipus: s.tipus, targy: s.targy, szoveg: s.szoveg, modositva: nowIso };
+    });
+    db.Beszallitok.forEach(function (b) { b.email_sablon = b.beszallito_id === 'B05' ? 'E-TEGEZO' : 'E-HIVATALOS'; });
     // Választólisták
     db.Listak = [];
     var addList = function (tipus, vals) {
@@ -781,12 +907,15 @@ var RaktarLogic = (function () {
 
   return {
     ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, MOVE_TYPES: MOVE_TYPES, SCHEMA: SCHEMA, TABLES: TABLES,
-    EDITABLE: EDITABLE, normalize: normalize, toNum: toNum, toBool: toBool, toDate: toDate, round3: round3,
-    newId: newId, index: index, get: get, exportDb: exportDb, cloneDb: cloneDb,
-    hasRole: hasRole, can: can, PERMS: PERMS, filterSnapshot: filterSnapshot, applyOp: applyOp, computeStock: computeStock, orderInfo: orderInfo,
+    normalize: normalize, round3: round3,
+    newId: newId, get: get, exportDb: exportDb, cloneDb: cloneDb,
+    can: can, PERMS: PERMS, filterSnapshot: filterSnapshot, applyOp: applyOp, computeStock: computeStock, orderInfo: orderInfo,
     sourcesFor: sourcesFor, roundPack: roundPack, generateDemoData: generateDemoData,
     orderMode: orderMode, productUrl: productUrl, usageStats: usageStats,
-    LIST_TYPES: LIST_TYPES, LIST_FIELD: LIST_FIELD, listValues: listValues
+    LIST_TYPES: LIST_TYPES, LIST_FIELD: LIST_FIELD, listValues: listValues,
+    inventorySessions: inventorySessions, inventoryDetails: inventoryDetails,
+    EMAIL_TYPES: EMAIL_TYPES, EMAIL_FIELDS: EMAIL_FIELDS, DEFAULT_EMAIL_TEMPLATES: DEFAULT_EMAIL_TEMPLATES,
+    emailTemplates: emailTemplates, emailItemList: emailItemList, fillTemplate: fillTemplate
   };
 })();
 
