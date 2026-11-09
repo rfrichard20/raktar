@@ -168,6 +168,18 @@ export function confirmDialog(title, text, okLabel = 'OK', kind = 'primary') {
   }).done.then(v => v === true);
 }
 
+/**
+ * Szabad szöveges mező, amely felajánlja a korábbi / lehetséges értékeket (a böngésző beépített
+ * javaslatlistája, <datalist>): gépeléskor szűr, de bármi beírható. Ellenőrzött listához (kategória,
+ * mértékegység, raktár) NEM ez kell, hanem a listSelect (common.js).
+ */
+let dlSeq = 0;
+export function suggestInput(name, value, values, placeholder = '') {
+  const id = 'dl-' + (++dlSeq);
+  const opts = [...new Set((values || []).map(v => String(v ?? '').trim()).filter(Boolean))];
+  return html`<input name="${name}" list="${id}" value="${value ?? ''}" placeholder="${placeholder}" autocomplete="off"><datalist id="${id}">${opts.map(v => html`<option value="${v}">`)}</datalist>`;
+}
+
 /** Űrlap mezők kiolvasása name attribútum alapján. */
 export function formValues(root) {
   const out = {};
@@ -210,7 +222,8 @@ export function popover(anchor, content, { onMount, onClose, minWidth } = {}) {
   const place = () => {
     const r = anchor.getBoundingClientRect();
     const w = el.offsetWidth, h = el.offsetHeight;
-    let left = Math.min(r.left, window.innerWidth - w - 8);
+    // clientWidth: a görgetősáv nélküli szélesség (az innerWidth-szel a panel a görgetősáv alá lógna, és vízszintes görgetés jelenne meg)
+    let left = Math.min(r.left, document.documentElement.clientWidth - w - 8);
     let top = r.bottom + 4;
     if (top + h > window.innerHeight - 8 && r.top - h - 4 > 8) top = r.top - h - 4; // felfelé, ha alul nincs hely
     el.style.left = Math.max(8, left) + window.scrollX + 'px';

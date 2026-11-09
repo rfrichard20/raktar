@@ -7,7 +7,7 @@
     else document.documentElement.removeAttribute('data-theme');
     // Rendszersáv színe: kézi választásnál mindkét meta a választott felületszín, automatikusnál a média szerinti alapérték
     var metas = document.querySelectorAll('meta[name=theme-color]');
-    var forced = t === 'dark' ? '#1d1f22' : t === 'light' ? '#ffffff' : null;
+    var forced = t === 'dark' ? '#1f2226' : t === 'light' ? '#ffffff' : null;
     for (var i = 0; i < metas.length; i++) {
       var m = metas[i];
       if (!m.hasAttribute('data-def')) m.setAttribute('data-def', m.getAttribute('content'));

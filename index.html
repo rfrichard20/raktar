@@ -8,7 +8,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <!-- Az állapotsáv/rendszersáv felveszi a felület színét (nem piros) -->
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1d1f22" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#1f2226" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Raktár">
   <title>Raktár</title>
@@ -23,7 +23,14 @@
     <header class="topbar">
       <a class="brand" href="#/attekinto"><img src="icon.svg" alt="" width="32" height="32"><span class="wordmark"><b>REALFLEX</b><small>RAKTÁR</small></span></a>
       <span id="demo-badge" class="badge badge-warn" hidden>DEMO</span>
+      <span id="ptitle" class="ptitle"></span>
+      <!-- Gyors tételkereső: bármelyik oldalról a tétel adatlapjára (mobilon a nagyító ikonnal nyílik) -->
+      <div id="gsearch" class="gsearch picker" hidden>
+        <input type="search" id="gq" placeholder="Tétel keresése (név, cikkszám, polc)…" autocomplete="off" aria-label="Tétel keresése">
+        <button type="button" id="gsearch-close" class="btn btn-sm gsearch-close">Mégse</button>
+      </div>
       <div class="topbar-right">
+        <button type="button" id="gsearch-btn" class="sync-pill gsearch-btn" aria-label="Tétel keresése" title="Tétel keresése" hidden></button>
         <a id="sync" class="sync-pill" href="#/fiok"></a>
         <a id="userbtn" class="userbtn" href="#/fiok"></a>
       </div>

@@ -186,12 +186,55 @@ export async function discardOutboxItem(opId) {
   emit();
 }
 
-/* ---------- Vázlatok (űrlapok helyi mentése) ---------- */
+/* ---------- Eszközszintű beállítások (a készüléken tárolva; privát módban az alapérték marad) ---------- */
+export function getPref(key, def) {
+  try { const v = localStorage.getItem('raktar:' + key); return v === null ? def : JSON.parse(v); } catch { return def; }
+}
+export function setPref(key, value) {
+  try { localStorage.setItem('raktar:' + key, JSON.stringify(value)); } catch { /* privát mód */ }
+  emit('pref');
+}
+
+/* ---------- Menü sorrendje (eszközszintű beállítás; null = alapértelmezett) ---------- */
+// Mobilon az első NAV_MAX menüpont az alsó sávban van, a többi ugyanebben a sorrendben a „Több” menüben.
+export const NAV_MAX = 4;
+export function getNavOrder() { const v = getPref('navOrder', null); return Array.isArray(v) ? v : null; }
+export const setNavOrder = keys => setPref('navOrder', keys || null);
+
+/* ---------- Vázlatok (folyamatban lévő űrlapok helyi mentése) ---------- */
 export const drafts = {
   get: key => idb.get('draft:' + key),
   set: (key, val) => idb.set('draft:' + key, val),
   del: key => idb.del('draft:' + key),
 };
+/**
+ * Egy folyamat (leltár, beérkezés, kivét, rendelési lista) vázlata: a készüléken tárolódik, így offline és
+ * bezárás után is folytatható. slot.draft: undefined = még nincs betöltve, null = nincs folyamatban.
+ * init(tárolt érték) → a használható vázlat (pl. régi formátum átalakítása / eldobása).
+ */
+export function draftSlot(key, init = d => d || null) {
+  let loading = null, busy = false;
+  const slot = {
+    draft: undefined,
+    save: () => drafts.set(key, slot.draft),
+    clear: () => { slot.draft = null; return drafts.del(key); },
+    /** Igaz, ha a vázlat be van töltve; különben „Betöltés…” jelenik meg, és betöltés után újrarajzol. */
+    ready(root, ctx) {
+      if (slot.draft !== undefined) return true;
+      root.innerHTML = '<p class="muted">Betöltés…</p>';
+      loading = loading || drafts.get(key).then(d => { slot.draft = init(d); });
+      loading.then(() => ctx.rerender());
+      return false;
+    },
+    /** Rögzítés dupla koppintás ellen: amíg az előző fut, újat nem indít. */
+    async once(fn) {
+      if (busy) return;
+      busy = true;
+      try { return await fn(); } finally { busy = false; }
+    },
+  };
+  return slot;
+}
 
 /* ---------- Kényelmi lekérdezések ---------- */
 export const get = (table, id) => L.get(state.db, table, id);
@@ -201,12 +244,21 @@ export const items = () => state.db.Tetelek;
 export const activeItems = () => state.db.Tetelek.filter(t => t.aktiv);
 export const supplierName = id => (get('Beszallitok', id) || {}).nev || '—';
 /** Rendelés kereshető szövege (beszállító, rendelésszám, belső azonosító, megjegyzés). */
-export const orderSearchText = o => `${supplierName(o.beszallito_id)} ${o.rendeles_id} ${o.belso_azon || ''} ${o.megjegyzes || ''}`;
+/** Nyitott vagy részben teljesült rendelések állapotadatokkal ({ o, info }), a legújabb elöl. */
+export const openOrders = () => state.db.Rendelesek.map(o => ({ o, info: L.orderInfo(state.db, o) }))
+  .filter(x => x.info.statusz === 'nyitott' || x.info.statusz === 'reszben')
+  .sort((a, b) => (a.o.datum < b.o.datum ? 1 : -1));
+export const orderSearchText =o => `${supplierName(o.beszallito_id)} ${o.rendeles_id} ${o.belso_azon || ''} ${o.megjegyzes || ''}`;
 export const userName = email => {
   const u = (state.db.Felhasznalok || []).find(x => x.email === email);
   return u ? u.nev || email : email || '—';
 };
 export const warehouses = () => [...new Set(state.db.Tetelek.filter(t => t.aktiv).map(t => t.raktar || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
+/** Egy mező eddigi értékei, a legutóbb használt elöl (javaslatlistához: suggestInput). */
+export const recentValues = (rows, field, dateField) => [...new Set((rows || []).slice()
+  .sort((a, b) => (a[dateField] < b[dateField] ? 1 : -1)).map(r => r[field]).filter(Boolean))].slice(0, 50);
+/** A tételeknél használt polc / hely értékek ábécérendben. */
+export const shelves = () => [...new Set(state.db.Tetelek.map(t => t.polc).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
 /** Hely felirat: „Raktár · Polc” (ami ki van töltve). */
 export const placeLabel = t => [t.raktar, t.polc].filter(Boolean).join(' · ') || '—';
 /** Tételek bejárási sorrendje: raktár, polc, név (a hely nélküliek a végén) – leltár, tételválasztó. */

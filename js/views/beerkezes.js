@@ -5,24 +5,17 @@ import { attachPicker } from './common.js';
 import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
-let draft;
-let loading = null;
-let saving = false; // rögzítés folyamatban (dupla koppintás ellen)
-const save = () => store.drafts.set('beerkezes', draft);
-
-function openOrders() {
-  const db = store.state.db;
-  return db.Rendelesek.map(o => ({ o, info: L.orderInfo(db, o) }))
-    .filter(x => x.info.statusz === 'nyitott' || x.info.statusz === 'reszben')
-    .sort((a, b) => (a.o.datum < b.o.datum ? 1 : -1));
-}
+// Vázlat: rendelés alapján { mode: 'rendeles', rendeles_id, lines: { sor_id: { on, q } }, … }
+// vagy rendelés nélkül { mode: 'szabad', beszallito_id, items: [{ tetel_id, q }], … }
+const slot = store.draftSlot('beerkezes');
+const save = slot.save;
 
 function startOrder(rid) {
-  draft = { mode: 'rendeles', rendeles_id: rid, datum: todayInput(), szallitolevel: '', megjegyzes: '', lezar: false, lines: {} };
+  slot.draft = { mode: 'rendeles', rendeles_id: rid, datum: todayInput(), szallitolevel: '', megjegyzes: '', lezar: false, lines: {} };
   save();
 }
 function startFree() {
-  draft = { mode: 'szabad', beszallito_id: '', datum: todayInput(), szallitolevel: '', megjegyzes: '', items: [] };
+  slot.draft = { mode: 'szabad', beszallito_id: '', datum: todayInput(), szallitolevel: '', megjegyzes: '', items: [] };
   save();
 }
 
@@ -39,7 +32,7 @@ const O_COLS = [
 function startBody() {
   const match = matcher(ui.q);
   const col = O_COLS.find(c => c[0] === ui.sort) || O_COLS[2];
-  const list = openOrders().map(x => ({ ...x, open: x.info.sorok.filter(s => !s.lezarva).length }))
+  const list = store.openOrders().map(x => ({ ...x, open: x.info.sorok.filter(s => !s.lezarva).length }))
     .filter(x => (!ui.st || x.info.statusz === ui.st) && match(store.orderSearchText(x.o)))
     .sort((a, b) => compare(col[2](a), col[2](b)) * ui.dir);
   return html`<table class="tbl cards fixed nochk">
@@ -58,9 +51,9 @@ function startBody() {
 }
 
 function renderStart(root, ctx) {
-  const count = openOrders().length;
+  const count = store.openOrders().length;
   root.innerHTML = String(html`
-    <div class="page-head"><h1>Beérkezés</h1>${help('Válaszd ki a megérkezett rendelést, és pipáld ki, mi jött meg. Hiányos szállításnál írd be a ténylegesen megjött mennyiséget – a maradék nyitva marad, vagy lezárhatod a rendelést. A beírt adatok a készüléken azonnal mentődnek.<br><br>„Rendelés nélkül”: olyan áru rögzítése, amihez nem készült rendelés az appban.')}
+    <div class="page-head"><h1>Beérkezés</h1>${help(html`Válaszd ki a megérkezett rendelést, és pipáld ki, mi jött meg. Hiányos szállításnál írd be a ténylegesen megjött mennyiséget – a maradék nyitva marad, vagy lezárhatod a rendelést. A beírt adatok a készüléken azonnal mentődnek.<br><br>„Rendelés nélkül”: olyan áru rögzítése, amihez nem készült rendelés az appban.`)}
       <div class="actions"><button class="btn" data-a="free" title="Rendelés nélküli beérkezés rögzítése">+ Rendelés nélkül</button></div></div>
     <div class="card">
       <div class="card-head"><h2 class="grow">Nyitott rendelések</h2><span class="badge badge-info">${count}</span></div>
@@ -82,21 +75,20 @@ function renderStart(root, ctx) {
     if (r) { startOrder(r.dataset.r); return ctx.rerender(); }
     if (e.target.closest('[data-a="free"]')) { startFree(); ctx.rerender(); }
   };
-  root.onkeydown = e => { if (e.key === 'Enter' && e.target.dataset.r) { startOrder(e.target.dataset.r); ctx.rerender(); } };
 }
 
 function headerFields() {
   return html`<div class="form-grid" style="margin-bottom:1rem">
-    <label class="field"><span>Beérkezés dátuma</span><input type="date" data-f="datum" value="${draft.datum}" max="${todayInput()}"></label>
-    <label class="field"><span>Szállítólevél / számla száma</span><input data-f="szallitolevel" value="${draft.szallitolevel}" placeholder="opcionális"></label>
-    <label class="field span-2"><span>Megjegyzés</span><input data-f="megjegyzes" value="${draft.megjegyzes}" placeholder="opcionális"></label>
+    <label class="field"><span>Beérkezés dátuma</span><input type="date" data-f="datum" value="${slot.draft.datum}" max="${todayInput()}"></label>
+    <label class="field"><span>Szállítólevél / számla száma</span><input data-f="szallitolevel" value="${slot.draft.szallitolevel}" placeholder="opcionális"></label>
+    <label class="field span-2"><span>Megjegyzés</span><input data-f="megjegyzes" value="${slot.draft.megjegyzes}" placeholder="opcionális"></label>
   </div>`;
 }
 
 function renderOrder(root, ctx) {
   const db = store.state.db;
-  const o = store.get('Rendelesek', draft.rendeles_id);
-  if (!o) { draft = null; save(); return ctx.rerender(); }
+  const o = store.get('Rendelesek', slot.draft.rendeles_id);
+  if (!o) { slot.clear(); return ctx.rerender(); }
   const info = L.orderInfo(db, o);
   const lines = info.sorok.filter(s => !s.lezarva);
   root.innerHTML = String(html`
@@ -110,7 +102,7 @@ function renderOrder(root, ctx) {
         <tbody>${lines.map(s => {
           const t = store.itemOrStub(s.tetel_id);
           const rem = L.round3(s.mennyiseg - s.beerkezett);
-          const d = draft.lines[s.sor_id] || {};
+          const d = slot.draft.lines[s.sor_id] || {};
           return html`<tr data-sor="${s.sor_id}" data-rem="${rem}">
             <td class="c-chk"><input type="checkbox" data-k="on" ${d.on ? 'checked' : ''} aria-label="Megérkezett"></td>
             <td class="c-main">${t.megnevezes}<div class="sub">${s.cikkszam}</div></td>
@@ -120,7 +112,7 @@ function renderOrder(root, ctx) {
             <td class="c-f4" data-l="Most érkezett"><input type="text" inputmode="decimal" data-k="q" value="${d.q ?? ''}" placeholder="${fmtNum(rem)}"></td>
           </tr>`;
         })}</tbody></table></div>` : html`<div class="empty">Ennek a rendelésnek nincs nyitott sora.</div>`}
-      <div class="bb-note"><label class="check small"><input type="checkbox" data-f="lezar" ${draft.lezar ? 'checked' : ''}> A ki nem pipált / hiányzó mennyiségre nem várok (rendelés lezárása)</label></div>
+      <div class="bb-note"><label class="check small"><input type="checkbox" data-f="lezar" ${slot.draft.lezar ? 'checked' : ''}> A ki nem pipált / hiányzó mennyiségre nem várok (rendelés lezárása)</label></div>
       <div class="bottom-bar">
         <span class="grow"></span>
         <button class="btn btn-sm btn-link-danger" data-a="cancel">Mégse</button>
@@ -132,7 +124,7 @@ function renderOrder(root, ctx) {
   if (tbody) {
     tbody.addEventListener('input', e => {
       const tr = e.target.closest('tr[data-sor]');
-      const d = draft.lines[tr.dataset.sor] = draft.lines[tr.dataset.sor] || {};
+      const d = slot.draft.lines[tr.dataset.sor] = slot.draft.lines[tr.dataset.sor] || {};
       if (e.target.dataset.k === 'q') {
         d.q = e.target.value;
         const n = parseNum(d.q);
@@ -144,7 +136,7 @@ function renderOrder(root, ctx) {
     tbody.addEventListener('change', e => {
       if (e.target.dataset.k !== 'on') return;
       const tr = e.target.closest('tr[data-sor]');
-      const d = draft.lines[tr.dataset.sor] = draft.lines[tr.dataset.sor] || {};
+      const d = slot.draft.lines[tr.dataset.sor] = slot.draft.lines[tr.dataset.sor] || {};
       d.on = e.target.checked;
       const inp = tr.querySelector('[data-k="q"]');
       if (d.on && !inp.value) { inp.value = tr.dataset.rem; d.q = tr.dataset.rem; }
@@ -156,7 +148,7 @@ function renderOrder(root, ctx) {
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'all') {
       root.querySelectorAll('tr[data-sor]').forEach(tr => {
-        draft.lines[tr.dataset.sor] = { on: true, q: tr.dataset.rem };
+        slot.draft.lines[tr.dataset.sor] = { on: true, q: tr.dataset.rem };
         tr.querySelector('[data-k="on"]').checked = true;
         tr.querySelector('[data-k="q"]').value = tr.dataset.rem;
       });
@@ -166,33 +158,32 @@ function renderOrder(root, ctx) {
     if (a === 'save') {
       const rows = [];
       for (const s of lines) {
-        const d = draft.lines[s.sor_id];
+        const d = slot.draft.lines[s.sor_id];
         if (!d || !d.on) continue;
         const q = parseNum(d.q);
         if (isNaN(q) || q <= 0) return toast('Érvénytelen mennyiség: ' + (store.get('Tetelek', s.tetel_id) || {}).megnevezes, 'error');
-        rows.push({ mozgas_id: L.newId('M', 12), datum: dateInputToIso(draft.datum), tipus: 'BEERKEZES', tetel_id: s.tetel_id,
-          mennyiseg: q, bizonylat: draft.szallitolevel || o.rendeles_id, rendeles_sor_id: s.sor_id, megjegyzes: draft.megjegyzes });
+        rows.push({ mozgas_id: L.newId('M', 12), datum: dateInputToIso(slot.draft.datum), tipus: 'BEERKEZES', tetel_id: s.tetel_id,
+          mennyiseg: q, bizonylat: slot.draft.szallitolevel || o.rendeles_id, rendeles_sor_id: s.sor_id, megjegyzes: slot.draft.megjegyzes });
       }
-      if (!rows.length && !draft.lezar) return toast('Pipáld ki a megérkezett tételeket.', 'warn');
-      if (saving) return;
-      saving = true;
-      try {
-        if (draft.lezar && !(await confirmDialog('Rendelés lezárása', 'A rendelés lezárul: a hiányzó mennyiségek nem jelennek meg „úton lévőként”, és a rendelési javaslat újra számol velük.', 'Rögzítés és lezárás'))) return;
-        const lezar = draft.lezar;
-        if (rows.length) {
-          await store.enqueue({ type: 'mozgasok', rows });
-          // A beérkezés rögzítve: a vázlat azonnal törlődik, hogy egy újabb „Rögzítés” ne vigye fel kétszer
-          draft = null; await store.drafts.del('beerkezes');
-        }
-        if (lezar) {
-          try { await store.enqueue({ type: 'rendeles_lezaras', rendeles_id: o.rendeles_id }); }
-          catch (x) { if (draft) throw x; toast('A beérkezés rögzítve, de a rendelés lezárása nem sikerült: ' + x.message, 'error', 8000); }
-        }
-        draft = null; await store.drafts.del('beerkezes');
-        toast('Beérkezés rögzítve', 'ok');
-        ctx.rerender();
-      } catch (x) { toast(x.message, 'error', 6000); }
-      finally { saving = false; }
+      if (!rows.length && !slot.draft.lezar) return toast('Pipáld ki a megérkezett tételeket.', 'warn');
+      await slot.once(async () => {
+        try {
+          if (slot.draft.lezar && !(await confirmDialog('Rendelés lezárása', 'A rendelés lezárul: a hiányzó mennyiségek nem jelennek meg „úton lévőként”, és a rendelési javaslat újra számol velük.', 'Rögzítés és lezárás'))) return;
+          const lezar = slot.draft.lezar;
+          if (rows.length) {
+            await store.enqueue({ type: 'mozgasok', rows });
+            // A beérkezés rögzítve: a vázlat azonnal törlődik, hogy egy újabb „Rögzítés” ne vigye fel kétszer
+            await slot.clear();
+          }
+          if (lezar) {
+            try { await store.enqueue({ type: 'rendeles_lezaras', rendeles_id: o.rendeles_id }); }
+            catch (x) { if (slot.draft) throw x; toast('A beérkezés rögzítve, de a rendelés lezárása nem sikerült: ' + x.message, 'error', 8000); }
+          }
+          await slot.clear();
+          toast('Beérkezés rögzítve', 'ok');
+          ctx.rerender();
+        } catch (x) { toast(x.message, 'error', 6000); }
+      });
     }
   };
 }
@@ -205,14 +196,14 @@ function renderFree(root, ctx) {
     <div class="card card-pad">
       <div class="form-grid" style="margin-bottom:1rem">
         <label class="field"><span>Beszállító</span><select data-f="beszallito_id"><option value="">— nincs megadva —</option>
-          ${sups.map(b => html`<option value="${b.beszallito_id}" ${b.beszallito_id === draft.beszallito_id ? 'selected' : ''}>${b.nev}</option>`)}</select></label>
+          ${sups.map(b => html`<option value="${b.beszallito_id}" ${b.beszallito_id === slot.draft.beszallito_id ? 'selected' : ''}>${b.nev}</option>`)}</select></label>
       </div>
       ${headerFields()}
     </div>
     <div class="card">
-      <div class="card-head"><div class="picker" style="flex:1;max-width:420px"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div></div>
-      ${draft.items.length ? html`<div class="table-wrap"><table class="tbl cards"><thead><tr><th>Tétel</th><th class="w-qty">Mennyiség</th><th style="width:50px"></th></tr></thead>
-        <tbody>${draft.items.map((it, i) => {
+      <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div></div>
+      ${slot.draft.items.length ? html`<div class="table-wrap"><table class="tbl cards nochk"><thead><tr><th>Tétel</th><th class="w-qty">Mennyiség</th><th style="width:50px"></th></tr></thead>
+        <tbody>${slot.draft.items.map((it, i) => {
           const t = store.itemOrStub(it.tetel_id);
           return html`<tr data-i="${i}"><td class="c-main">${t.megnevezes}<div class="sub">${store.placeLabel(t)} · ${t.mertekegyseg}</div></td>
             <td class="c-f1" data-l="Mennyiség"><input type="text" inputmode="decimal" data-k="q" value="${it.q}" placeholder="${t.mertekegyseg}"></td>
@@ -226,14 +217,14 @@ function renderFree(root, ctx) {
   attachPicker(root.querySelector('#add'), {
     items: () => {
       const list = store.activeItems();
-      if (!draft.beszallito_id) return list;
-      const has = new Set(db.Forrasok.filter(f => f.beszallito_id === draft.beszallito_id).map(f => f.tetel_id));
+      if (!slot.draft.beszallito_id) return list;
+      const has = new Set(db.Forrasok.filter(f => f.beszallito_id === slot.draft.beszallito_id).map(f => f.tetel_id));
       return [...list.filter(t => has.has(t.tetel_id)), ...list.filter(t => !has.has(t.tetel_id))];
     },
-    exclude: () => new Set(draft.items.map(x => x.tetel_id)),
-    defaultSupplier: () => draft.beszallito_id,
+    exclude: () => new Set(slot.draft.items.map(x => x.tetel_id)),
+    defaultSupplier: () => slot.draft.beszallito_id,
     onPick: t => {
-      draft.items.push({ tetel_id: t.tetel_id, q: '' });
+      slot.draft.items.push({ tetel_id: t.tetel_id, q: '' });
       save(); ctx.rerender();
       const inputs = root.querySelectorAll('[data-k="q"]');
       if (inputs.length) inputs[inputs.length - 1].focus();
@@ -241,33 +232,32 @@ function renderFree(root, ctx) {
   });
   root.querySelector('tbody')?.addEventListener('input', e => {
     const tr = e.target.closest('tr[data-i]');
-    draft.items[Number(tr.dataset.i)].q = e.target.value;
+    slot.draft.items[Number(tr.dataset.i)].q = e.target.value;
     save();
   });
   root.onclick = async e => {
     const b = e.target.closest('[data-a]');
     if (!b) return;
-    if (b.dataset.a === 'del') { draft.items.splice(Number(b.dataset.i), 1); save(); ctx.rerender(); }
+    if (b.dataset.a === 'del') { slot.draft.items.splice(Number(b.dataset.i), 1); save(); ctx.rerender(); }
     if (b.dataset.a === 'cancel') await cancel(ctx);
     if (b.dataset.a === 'save') {
-      if (!draft.items.length) return toast('Adj hozzá legalább egy tételt.', 'warn');
+      if (!slot.draft.items.length) return toast('Adj hozzá legalább egy tételt.', 'warn');
       const rows = [];
-      for (const it of draft.items) {
+      for (const it of slot.draft.items) {
         const q = parseNum(it.q);
         if (isNaN(q) || q <= 0) return toast('Hiányzó vagy hibás mennyiség: ' + store.itemOrStub(it.tetel_id).megnevezes, 'error');
-        const sup = draft.beszallito_id ? store.supplierName(draft.beszallito_id) : '';
-        rows.push({ mozgas_id: L.newId('M', 12), datum: dateInputToIso(draft.datum), tipus: 'BEERKEZES', tetel_id: it.tetel_id,
-          mennyiseg: q, bizonylat: draft.szallitolevel || 'Rendelés nélkül', megjegyzes: [sup, draft.megjegyzes].filter(Boolean).join(' – ') });
+        const sup = slot.draft.beszallito_id ? store.supplierName(slot.draft.beszallito_id) : '';
+        rows.push({ mozgas_id: L.newId('M', 12), datum: dateInputToIso(slot.draft.datum), tipus: 'BEERKEZES', tetel_id: it.tetel_id,
+          mennyiseg: q, bizonylat: slot.draft.szallitolevel || 'Rendelés nélkül', megjegyzes: [sup, slot.draft.megjegyzes].filter(Boolean).join(' – ') });
       }
-      if (saving) return;
-      saving = true;
-      try {
-        await store.enqueue({ type: 'mozgasok', rows });
-        draft = null; await store.drafts.del('beerkezes');
-        toast('Beérkezés rögzítve', 'ok');
-        ctx.rerender();
-      } catch (x) { toast(x.message, 'error', 6000); }
-      finally { saving = false; }
+      await slot.once(async () => {
+        try {
+          await store.enqueue({ type: 'mozgasok', rows });
+          await slot.clear();
+          toast('Beérkezés rögzítve', 'ok');
+          ctx.rerender();
+        } catch (x) { toast(x.message, 'error', 6000); }
+      });
     }
   };
 }
@@ -275,7 +265,7 @@ function renderFree(root, ctx) {
 function bindHeader(root) {
   root.querySelectorAll('[data-f]').forEach(el => {
     el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
-      draft[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+      slot.draft[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
       save();
     });
   });
@@ -283,30 +273,24 @@ function bindHeader(root) {
 
 async function cancel(ctx) {
   if (!(await confirmDialog('Mégse', 'A beírt adatok elvesznek. Biztosan kilépsz?', 'Kilépés', 'danger'))) return;
-  draft = null;
-  await store.drafts.del('beerkezes');
+  await slot.clear();
   ctx.rerender();
 }
 
 export default {
-  get liveUpdate() { return !draft; },
+  get liveUpdate() { return !slot.draft; },
   render(root, params, ctx) {
-    if (draft === undefined) {
-      root.innerHTML = '<p class="muted">Betöltés…</p>';
-      loading = loading || store.drafts.get('beerkezes').then(d => { draft = d || null; });
-      loading.then(() => ctx.rerender());
-      return;
-    }
+    if (!slot.ready(root, ctx)) return;
     if (params.r) {
       const rid = params.r;
       delete params.r;
       history.replaceState(null, '', '#/beerkezes');
-      if (draft && !(draft.mode === 'rendeles' && draft.rendeles_id === rid)) {
+      if (slot.draft && !(slot.draft.mode === 'rendeles' && slot.draft.rendeles_id === rid)) {
         toast('Egy másik beérkezés rögzítése folyamatban van – előbb fejezd be vagy vesd el.', 'warn', 6000);
-      } else if (!draft && store.get('Rendelesek', rid)) startOrder(rid);
+      } else if (!slot.draft && store.get('Rendelesek', rid)) startOrder(rid);
     }
-    if (!draft) renderStart(root, ctx);
-    else if (draft.mode === 'rendeles') renderOrder(root, ctx);
+    if (!slot.draft) renderStart(root, ctx);
+    else if (slot.draft.mode === 'rendeles') renderOrder(root, ctx);
     else renderFree(root, ctx);
   },
 };

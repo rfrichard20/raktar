@@ -1,15 +1,15 @@
 // Rendelés: feltöltési javaslat → rendelési lista (amit most rendelünk) → rendelések követése.
 import * as store from '../store.js';
-import { html, fmtNum, fmtDate, fmtMoney, parseNum, confirmDialog, toast, modal, copyText, help, popover, matcher, dateStamp, sec, ORDER_STATUS } from '../ui.js';
+import { html, fmtNum, fmtDate, fmtMoney, parseNum, confirmDialog, toast, modal, copyText, help, popover, matcher, dateStamp, sec, suggestInput, ORDER_STATUS } from '../ui.js';
 import { attachPicker, showItemDetail, emailDialog } from './common.js';
 import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
 const ui = { tab: 'javaslat', all: false, open: new Set() };
-// draft: { list: { tetel_id: { origin: 'javaslat'|'kezi', forras_id?, q?, ar?, cart? } }, skip: { tetel_id: true } }
-let draft;
-let loading = null;
-const save = () => store.drafts.set('javaslat', draft);
+// Vázlat (rendelési lista): { list: { tetel_id: { origin: 'javaslat'|'kezi', forras_id?, q?, ar?, cart? } },
+// skip: { tetel_id: true }, mode: { beszallito_id: 'webshop'|'email' } }. Régi formátumú vázlat: üres lista.
+const slot = store.draftSlot('javaslat', d => (d && d.list ? d : { list: {}, skip: {} }));
+const save = slot.save;
 
 const supKey = f => (f ? f.beszallito_id : '');
 function supSort(a, b) {
@@ -31,7 +31,7 @@ function suggestions() {
     .map(s => {
       const t = store.get('Tetelek', s.tetel_id);
       const { f } = sourceOf(t.tetel_id, {});
-      return { t, s, f, q: L.roundPack(s.javaslat, f ? f.kiszereles : 1), onList: !!draft.list[t.tetel_id] };
+      return { t, s, f, q: L.roundPack(s.javaslat, f ? f.kiszereles : 1), onList: !!slot.draft.list[t.tetel_id] };
     })
     .sort((a, b) => supSort(supKey(a.f), supKey(b.f)) || a.t.megnevezes.localeCompare(b.t.megnevezes, 'hu'));
 }
@@ -39,7 +39,7 @@ function suggestions() {
 function renderJavaslat(body, ctx) {
   const rows = suggestions();
   const avail = rows.filter(r => !r.onList);
-  const chosen = avail.filter(r => !draft.skip[r.t.tetel_id]);
+  const chosen = avail.filter(r => !slot.draft.skip[r.t.tetel_id]);
   const canEdit = store.can('raktaros');
   body.innerHTML = String(html`
     <div class="toolbar">
@@ -52,9 +52,9 @@ function renderJavaslat(body, ctx) {
       <colgroup><col style="width:44px"><col><col style="width:30%"><col style="width:11%"><col style="width:15%"></colgroup>
       <thead><tr><th>${canEdit && avail.length ? html`<input type="checkbox" data-k="all" ${chosen.length === avail.length ? 'checked' : ''} title="Mind kijelölése" aria-label="Mind kijelölése">` : ''}</th>
         <th>Tétel</th><th>Beszállító / cikkszám</th><th class="num">Úton</th><th class="num">Javasolt</th></tr></thead>
-      <tbody>${rows.map(r => html`<tr data-id="${r.t.tetel_id}" class="${r.onList ? 'row-done' : draft.skip[r.t.tetel_id] ? 'off' : ''}">
+      <tbody>${rows.map(r => html`<tr data-id="${r.t.tetel_id}" class="${r.onList ? 'row-done' : slot.draft.skip[r.t.tetel_id] ? 'off' : ''}">
         <td class="c-chk">${r.onList ? html`<span class="badge badge-ok" title="Már a rendelési listán">✓</span>`
-          : html`<input type="checkbox" data-k="pick" ${draft.skip[r.t.tetel_id] ? '' : 'checked'} ${canEdit ? '' : 'disabled'} aria-label="Kijelölés">`}</td>
+          : html`<input type="checkbox" data-k="pick" ${slot.draft.skip[r.t.tetel_id] ? '' : 'checked'} ${canEdit ? '' : 'disabled'} aria-label="Kijelölés">`}</td>
         <td class="c-main"><a href="#" data-a="detail">${r.t.megnevezes}</a>${r.onList ? html` <span class="badge badge-ok">listán</span>` : ''}
           <div class="sub">Készlet ${fmtNum(r.s.keszlet)} · min ${fmtNum(r.t.min_keszlet)} · cél ${fmtNum(r.t.cel_keszlet)} ${r.t.mertekegyseg}</div></td>
         <td class="c-meta">${r.f ? html`${store.supplierName(r.f.beszallito_id)} <span class="small muted">· ${r.f.cikkszam}</span>` : html`<span class="t-warn">nincs forrás</span>`}</td>
@@ -65,12 +65,12 @@ function renderJavaslat(body, ctx) {
   body.oninput = null;
   body.onchange = e => {
     if (e.target.dataset.k === 'all') {
-      avail.forEach(r => { if (e.target.checked) delete draft.skip[r.t.tetel_id]; else draft.skip[r.t.tetel_id] = true; });
+      avail.forEach(r => { if (e.target.checked) delete slot.draft.skip[r.t.tetel_id]; else slot.draft.skip[r.t.tetel_id] = true; });
       save(); return ctx.rerender();
     }
     const tr = e.target.closest('tr[data-id]');
     if (!tr || e.target.dataset.k !== 'pick') return;
-    if (e.target.checked) delete draft.skip[tr.dataset.id]; else draft.skip[tr.dataset.id] = true;
+    if (e.target.checked) delete slot.draft.skip[tr.dataset.id]; else slot.draft.skip[tr.dataset.id] = true;
     save(); ctx.rerender();
   };
   body.onclick = e => {
@@ -79,10 +79,8 @@ function renderJavaslat(body, ctx) {
     e.preventDefault();
     const a = b.dataset.a;
     if (a === 'detail') return showItemDetail(b.closest('tr').dataset.id);
-    if (a === 'all') { avail.forEach(r => delete draft.skip[r.t.tetel_id]); save(); return ctx.rerender(); }
-    if (a === 'none') { avail.forEach(r => { draft.skip[r.t.tetel_id] = true; }); save(); return ctx.rerender(); }
     if (a === 'tolist') {
-      chosen.forEach(r => { draft.list[r.t.tetel_id] = { origin: 'javaslat' }; });
+      chosen.forEach(r => { slot.draft.list[r.t.tetel_id] = { origin: 'javaslat' }; });
       save();
       toast(`${chosen.length} tétel a rendelési listára került`, 'ok');
       ui.tab = 'lista';
@@ -94,7 +92,7 @@ function renderJavaslat(body, ctx) {
 /* =================== 2. Rendelési lista =================== */
 function listRows() {
   const st = store.state.stock;
-  return Object.entries(draft.list).filter(([id]) => store.get('Tetelek', id)).map(([id, sel]) => {
+  return Object.entries(slot.draft.list).filter(([id]) => store.get('Tetelek', id)).map(([id, sel]) => {
     const t = store.get('Tetelek', id);
     const s = st[id];
     const { srcs, f } = sourceOf(id, sel);
@@ -111,8 +109,8 @@ function listRows() {
 function groupMode(k) {
   const sup = store.get('Beszallitok', k);
   if (!sup) return 'email';
-  draft.mode = draft.mode || {};
-  return draft.mode[k] || L.orderMode(sup);
+  slot.draft.mode = slot.draft.mode || {};
+  return slot.draft.mode[k] || L.orderMode(sup);
 }
 
 function renderLista(body, ctx) {
@@ -126,7 +124,7 @@ function renderLista(body, ctx) {
   const groupTotal = list => list.filter(included).reduce((a, r) => a + r.q * r.ar, 0);
 
   body.innerHTML = String(html`
-    <div class="toolbar">
+    <div class="toolbar sticky-search">
       ${canEdit ? html`<div class="picker" style="flex:1;max-width:420px"><input id="add" placeholder="+ Tétel hozzáadása a listához…" autocomplete="off"></div>` : ''}
       ${help(html`A rendelés módja beszállítónként átváltható (<b>Webshop</b> / <b>E-mail</b>), pl. egyedi ajánlatkéréshez.<br><br>
         <b>Webshop:</b> a ${ICONS.ext} ikon a vágólapra másolja a cikkszámot és megnyitja a terméket / keresést. Kosárba tétel után pipáld ki a sort, a végén „Rendelés rögzítése”.<br><br>
@@ -148,7 +146,7 @@ function renderLista(body, ctx) {
       const allOn = list.every(r => r.cart);
       return html`<div class="card" data-group="${k}">
         <div class="card-head">
-          <div class="grow" style="min-width:0"><h2>${sup ? sup.nev : 'Nincs beszerzési forrás'}</h2>
+          <div class="head-main"><h2>${sup ? sup.nev : 'Nincs beszerzési forrás'}</h2>
             ${sup ? html`<div class="small muted">${sup.weboldal ? html`<a href="${sup.weboldal}" target="_blank" rel="noopener">${sup.weboldal.replace(/^https?:\/\//, '')} ↗</a> · ` : ''}${[sup.kapcsolattarto, sup.email, sup.telefon].filter(Boolean).join(' · ')}</div>`
               : html`<div class="small t-warn">Ezekhez a tételekhez nincs megadva beszerzési forrás (Törzsadatok).</div>`}</div>
           ${sup ? html`<div class="group-actions">
@@ -179,7 +177,7 @@ function renderLista(body, ctx) {
             <td class="c-f1" data-l="Mennyiség"><input type="text" inputmode="decimal" data-k="q" value="${r.qRaw}" placeholder="${r.t.mertekegyseg}" ${canEdit ? '' : 'disabled'}>
               ${r.javasolt && r.q !== r.javasolt ? html`<div class="small muted">javasolt: ${fmtNum(r.javasolt)}</div>` : ''}</td>
             <td class="c-f2" data-l="Egységár"><input type="text" inputmode="decimal" data-k="ar" value="${r.arRaw}" placeholder="Ft" ${canEdit ? '' : 'disabled'}>
-              <div class="small" data-arnote class="t-warn">${r.arChanged ? `törzsadat: ${fmtMoney(r.arMaster)}` : ''}</div></td>
+              <div class="small t-warn" data-arnote>${r.arChanged ? `törzsadat: ${fmtMoney(r.arMaster)}` : ''}</div></td>
             <td class="num c-f3" data-l="Érték" data-value>${r.q > 0 && r.ar ? fmtMoney(r.q * r.ar) : '–'}</td>
             <td class="c-act"><div class="row-icons">
               ${r.srcs.length > 1 && canEdit ? html`<button class="icon-btn" data-a="src" title="Másik beszerzési forrás (${r.srcs.length})" aria-label="Forrás váltása">${ICONS.swap}</button>` : ''}
@@ -199,9 +197,9 @@ function renderLista(body, ctx) {
   const addEl = body.querySelector('#add');
   if (addEl) attachPicker(addEl, {
     items: store.activeItems,
-    exclude: () => new Set(Object.keys(draft.list)),
+    exclude: () => new Set(Object.keys(slot.draft.list)),
     onPick: t => {
-      draft.list[t.tetel_id] = { origin: 'kezi' };
+      slot.draft.list[t.tetel_id] = { origin: 'kezi' };
       save(); ctx.rerender();
       const inp = body.querySelector(`tr[data-id="${t.tetel_id}"] [data-k="q"]`);
       if (inp) { inp.focus(); inp.scrollIntoView({ block: 'nearest' }); }
@@ -213,7 +211,7 @@ function renderLista(body, ctx) {
     const tr = e.target.closest('tr[data-id]');
     const k = e.target.dataset.k;
     if (!tr || (k !== 'q' && k !== 'ar')) return;
-    draft.list[tr.dataset.id][k] = e.target.value;
+    slot.draft.list[tr.dataset.id][k] = e.target.value;
     save();
     const all = listRows();
     const r = all.find(x => x.id === tr.dataset.id);
@@ -227,9 +225,9 @@ function renderLista(body, ctx) {
     const k = e.target.dataset.k;
     if (k === 'all') {
       const g = e.target.dataset.g;
-      rows.filter(r => supKey(r.f) === g).forEach(r => { draft.list[r.id].cart = e.target.checked; });
+      rows.filter(r => supKey(r.f) === g).forEach(r => { slot.draft.list[r.id].cart = e.target.checked; });
     } else if (k === 'cart') {
-      draft.list[e.target.closest('tr[data-id]').dataset.id].cart = e.target.checked;
+      slot.draft.list[e.target.closest('tr[data-id]').dataset.id].cart = e.target.checked;
     } else return;
     save(); ctx.rerender();
   };
@@ -242,14 +240,14 @@ function renderLista(body, ctx) {
     if (a === 'gojav') { ui.tab = 'javaslat'; return ctx.rerender(); }
     if (a === 'detail') return showItemDetail(tr.dataset.id);
     if (a === 'copycikk') return copyText(b.dataset.cikk);
-    if (a === 'mode') { draft.mode = draft.mode || {}; draft.mode[b.dataset.g] = b.dataset.mode; save(); return ctx.rerender(); }
+    if (a === 'mode') { slot.draft.mode = slot.draft.mode || {}; slot.draft.mode[b.dataset.g] = b.dataset.mode; save(); return ctx.rerender(); }
     if (a === 'openshop') {
       copyText(b.dataset.cikk); // előbb a másolás (felhasználói művelethez kötött), utána az új lap
       window.open(b.dataset.url, '_blank', 'noopener');
       tr.classList.add('row-opened');
       return;
     }
-    if (a === 'rm') { delete draft.list[tr.dataset.id]; save(); return ctx.rerender(); }
+    if (a === 'rm') { delete slot.draft.list[tr.dataset.id]; save(); return ctx.rerender(); }
     if (a === 'src') return pickSource(b, tr.dataset.id, ctx);
     const k = b.dataset.g;
     const sup = store.get('Beszallitok', k);
@@ -262,7 +260,7 @@ function renderLista(body, ctx) {
 }
 
 function pickSource(anchor, id, ctx) {
-  const sel = draft.list[id];
+  const sel = slot.draft.list[id];
   const t = store.get('Tetelek', id);
   const { srcs, f } = sourceOf(id, sel);
   popover(anchor, html`<div class="pop-title">Beszerzési forrás</div>
@@ -281,12 +279,8 @@ function pickSource(anchor, id, ctx) {
   });
 }
 
-let creating = false; // rendelés létrehozása folyamatban (dupla rögzítés ellen)
-async function createOrder(...args) {
-  if (creating) return;
-  creating = true;
-  try { await createOrderInner(...args); } finally { creating = false; }
-}
+/** Rendelés létrehozása (dupla rögzítés ellen a vázlat once-ával). */
+const createOrder = (...args) => slot.once(() => createOrderInner(...args));
 async function createOrderInner(k, sup, web, list, lines, ctx) {
   if (list.some(r => isNaN(r.q))) return toast('Hibás mennyiség a listában.', 'error');
   const sum = fmtMoney(list.reduce((a, r) => a + r.q * r.ar, 0));
@@ -298,7 +292,7 @@ async function createOrderInner(k, sup, web, list, lines, ctx) {
       ${changed.length ? html`<div class="notice notice-warn small">${changed.length} tételnél az egységár eltér a törzsadattól.</div>
         <label class="check"><input type="checkbox" name="arment" checked> Az új árakat mentsd el a törzsadatba is</label>` : ''}
       ${sec('Azonosítás (opcionális)', html`
-        <label class="field"><span>Belső azonosító</span><input name="belso_azon" placeholder="pl. MiniCRM azonosító"></label>
+        <label class="field"><span>Belső azonosító</span>${suggestInput('belso_azon', '', store.recentValues(store.state.db.Rendelesek, 'belso_azon', 'datum'), 'pl. MiniCRM azonosító')}</label>
         <label class="field"><span>Megjegyzés</span><input name="megjegyzes" placeholder="pl. webshop rendelésszám"></label>`)}`,
     actions: [{ label: 'Mégse', value: null }, {
       label: web ? 'Rögzítés' : 'Létrehozás', kind: 'primary',
@@ -318,7 +312,7 @@ async function createOrderInner(k, sup, web, list, lines, ctx) {
         cikkszam: r.f.cikkszam, mennyiseg: r.q, egysegar: r.ar, megjegyzes: '' })),
     });
     if (v.arment) for (const r of changed) await store.enqueue({ type: 'forras_ar', forras_id: r.f.forras_id, egysegar: r.ar });
-    list.forEach(r => { delete draft.list[r.id]; });
+    list.forEach(r => { delete slot.draft.list[r.id]; });
     save();
     ctx.rerender();
     if (web) toast(`Rendelés rögzítve (${rid})`, 'ok');
@@ -327,63 +321,66 @@ async function createOrderInner(k, sup, web, list, lines, ctx) {
 }
 
 /* ---------- Rendelések ---------- */
+/** A rendelések listája (szűrve): fejlécsor + lenyitva a tételek és a műveletek. */
+function ordersList(canEdit) {
+  const db = store.state.db;
+  const match = matcher(ui.oq || '');
+  const list = (ui.all ? db.Rendelesek.map(o => ({ o, info: L.orderInfo(db, o) })).sort((a, b) => (a.o.datum < b.o.datum ? 1 : -1)) : store.openOrders())
+    .filter(x => match(store.orderSearchText(x.o)));
+  if (!list.length) return html`<div class="empty">Nincs ${ui.all ? '' : 'nyitott '}rendelés.</div>`;
+  return html`${list.map(({ o, info }) => {
+    const [lbl, cls] = ORDER_STATUS[info.statusz];
+    const isOpen = ui.open.has(o.rendeles_id);
+    return html`<div class="list-item" data-a="toggle" data-r="${o.rendeles_id}" role="button" tabindex="0" aria-expanded="${isOpen}">
+        <div class="grow"><b>${store.supplierName(o.beszallito_id)}</b>${o.belso_azon ? html` <span class="badge badge-muted" title="Belső azonosító">${o.belso_azon}</span>` : ''}
+          <div class="small muted">${o.rendeles_id} · ${fmtDate(o.datum)} · ${info.sorok.length} tétel · ${store.userName(o.letrehozta)}${o.megjegyzes && o.megjegyzes !== 'Webshop' ? ` · ${o.megjegyzes}` : ''}</div></div>
+        <span class="nowrap small">${fmtMoney(info.ertek)}</span>
+        <span class="badge badge-${cls}">${lbl}</span><span aria-hidden="true">${isOpen ? '▾' : '▸'}</span>
+      </div>
+      ${isOpen ? html`<div style="padding:0 1rem 1rem;border-bottom:1px solid var(--border)">
+        <div class="table-wrap"><table class="tbl small cards nochk flow">
+          <thead><tr><th>Tétel</th><th>Cikkszám</th><th class="num">Rendelt</th><th class="num">Megérkezett</th><th>Állapot</th></tr></thead>
+          <tbody>${info.sorok.map(s => {
+            const t = store.itemOrStub(s.tetel_id);
+            const full = s.beerkezett >= s.mennyiseg;
+            return html`<tr><td class="c-main">${t.megnevezes}</td><td data-l="Cikkszám">${s.cikkszam}</td>
+              <td class="num" data-l="Rendelt">${fmtNum(s.mennyiseg)} ${t.mertekegyseg}</td>
+              <td class="num" data-l="Megjött">${fmtNum(s.beerkezett)}</td>
+              <td data-l="Állapot">${full ? html`<span class="badge badge-ok">Megérkezett</span>` : s.lezarva ? html`<span class="badge badge-muted">Lezárva (hiányos)</span>`
+                : s.beerkezett > 0 ? html`<span class="badge badge-warn">Részben</span>` : html`<span class="badge badge-info">Várakozik</span>`}</td></tr>`;
+          })}</tbody></table></div>
+        <div class="toolbar" style="margin:.75rem 0 0">
+          ${canEdit && info.nyitottSorok ? html`<a class="btn btn-primary btn-sm" href="#/beerkezes?r=${encodeURIComponent(o.rendeles_id)}">Beérkezés rögzítése</a>` : ''}
+          <button class="btn btn-sm" data-a="mail" data-r="${o.rendeles_id}">E-mail…</button>
+          ${canEdit ? html`<button class="btn btn-sm" data-a="meta" data-r="${o.rendeles_id}" title="Belső azonosító és megjegyzés">Azonosító, megjegyzés…</button>` : ''}
+          ${canEdit && info.nyitottSorok && info.sorok.some(s => s.beerkezett > 0) ? html`<button class="btn btn-sm btn-danger" data-a="close" data-r="${o.rendeles_id}" title="A hiányzó mennyiségekre nem vársz tovább">Rendelés lezárása</button>` : ''}
+          ${canEdit && !info.sorok.some(s => s.beerkezett > 0) ? html`<button class="btn btn-sm btn-danger" data-a="delete" data-r="${o.rendeles_id}" title="Téves vagy meghiúsult rendelés törlése (még semmi nem érkezett belőle)">Rendelés törlése</button>` : ''}
+        </div>
+      </div>` : ''}`;
+  })}`;
+}
+
 function renderOrders(body, ctx) {
   const db = store.state.db;
-  const all = db.Rendelesek.map(o => ({ o, info: L.orderInfo(db, o) })).sort((a, b) => (a.o.datum < b.o.datum ? 1 : -1));
-  const match = matcher(ui.oq || '');
-  const list = (ui.all ? all : all.filter(x => x.info.statusz === 'nyitott' || x.info.statusz === 'reszben'))
-    .filter(x => match(store.orderSearchText(x.o)));
   const canEdit = store.can('raktaros');
   body.innerHTML = String(html`
     <div class="toolbar">
       <input type="search" data-oq placeholder="Keresés (beszállító, rendelésszám, belső azonosító)…" value="${ui.oq || ''}">
       <button class="chip ${ui.all ? '' : 'on'}" data-a="open">Nyitott</button>
-      <button class="chip ${ui.all ? 'on' : ''}" data-a="all">Összes (${all.length})</button>
+      <button class="chip ${ui.all ? 'on' : ''}" data-a="all">Összes (${db.Rendelesek.length})</button>
     </div>
-    <div class="card">${list.length ? list.map(({ o, info }) => {
-      const [lbl, cls] = ORDER_STATUS[info.statusz];
-      const isOpen = ui.open.has(o.rendeles_id);
-      return html`<div class="list-item" data-a="toggle" data-r="${o.rendeles_id}">
-          <div class="grow"><b>${store.supplierName(o.beszallito_id)}</b>${o.belso_azon ? html` <span class="badge badge-muted" title="Belső azonosító">${o.belso_azon}</span>` : ''}
-            <div class="small muted">${o.rendeles_id} · ${fmtDate(o.datum)} · ${info.sorok.length} tétel · ${store.userName(o.letrehozta)}${o.megjegyzes && o.megjegyzes !== 'Webshop' ? ` · ${o.megjegyzes}` : ''}</div></div>
-          <span class="nowrap small">${fmtMoney(info.ertek)}</span>
-          <span class="badge badge-${cls}">${lbl}</span><span aria-hidden="true">${isOpen ? '▾' : '▸'}</span>
-        </div>
-        ${isOpen ? html`<div style="padding:0 1rem 1rem;border-bottom:1px solid var(--border)">
-          <div class="table-wrap"><table class="tbl small cards nochk flow">
-            <thead><tr><th>Tétel</th><th>Cikkszám</th><th class="num">Rendelt</th><th class="num">Megérkezett</th><th>Állapot</th></tr></thead>
-            <tbody>${info.sorok.map(s => {
-              const t = store.itemOrStub(s.tetel_id);
-              const full = s.beerkezett >= s.mennyiseg;
-              return html`<tr><td class="c-main">${t.megnevezes}</td><td data-l="Cikkszám">${s.cikkszam}</td>
-                <td class="num" data-l="Rendelt">${fmtNum(s.mennyiseg)} ${t.mertekegyseg}</td>
-                <td class="num" data-l="Megjött">${fmtNum(s.beerkezett)}</td>
-                <td data-l="Állapot">${full ? html`<span class="badge badge-ok">Megérkezett</span>` : s.lezarva ? html`<span class="badge badge-muted">Lezárva (hiányos)</span>`
-                  : s.beerkezett > 0 ? html`<span class="badge badge-warn">Részben</span>` : html`<span class="badge badge-info">Várakozik</span>`}</td></tr>`;
-            })}</tbody></table></div>
-          <div class="toolbar" style="margin:.75rem 0 0">
-            ${canEdit && info.nyitottSorok ? html`<a class="btn btn-primary btn-sm" href="#/beerkezes?r=${encodeURIComponent(o.rendeles_id)}">Beérkezés rögzítése</a>` : ''}
-            <button class="btn btn-sm" data-a="mail" data-r="${o.rendeles_id}">E-mail…</button>
-            ${canEdit ? html`<button class="btn btn-sm" data-a="meta" data-r="${o.rendeles_id}" title="Belső azonosító és megjegyzés">Azonosító, megjegyzés…</button>` : ''}
-            ${canEdit && info.nyitottSorok && info.sorok.some(s => s.beerkezett > 0) ? html`<button class="btn btn-sm btn-danger" data-a="close" data-r="${o.rendeles_id}" title="A hiányzó mennyiségekre nem vársz tovább">Rendelés lezárása</button>` : ''}
-            ${canEdit && !info.sorok.some(s => s.beerkezett > 0) ? html`<button class="btn btn-sm btn-danger" data-a="delete" data-r="${o.rendeles_id}" title="Téves vagy meghiúsult rendelés törlése (még semmi nem érkezett belőle)">Rendelés törlése</button>` : ''}
-          </div>
-        </div>` : ''}`;
-    }) : html`<div class="empty">Nincs ${ui.all ? '' : 'nyitott '}rendelés.</div>`}</div>`);
+    <div class="card" data-olist>${ordersList(canEdit)}</div>`);
 
   const linesOf = rid => L.orderInfo(db, store.get('Rendelesek', rid)).sorok.map(s => {
     const t = store.itemOrStub(s.tetel_id);
     return { cikkszam: s.cikkszam, megnevezes: t.megnevezes, q: s.mennyiseg, me: t.mertekegyseg };
   });
   body.onchange = null;
+  // Kereséskor csak a lista frissül (a kereső fókusza megmarad)
   body.oninput = e => {
     if (!e.target.matches('[data-oq]')) return;
     ui.oq = e.target.value;
-    const pos = e.target.selectionStart;
-    renderOrders(body, ctx);
-    const inp = body.querySelector('[data-oq]');
-    inp.focus();
-    inp.setSelectionRange(pos, pos);
+    body.querySelector('[data-olist]').innerHTML = String(ordersList(canEdit));
   };
   body.onclick = async e => {
     const b = e.target.closest('[data-a]');
@@ -397,7 +394,7 @@ function renderOrders(body, ctx) {
       const v = await modal({
         title: `Rendelés – ${rid}`,
         body: html`<div class="form-col">
-          <label class="field"><span>Belső azonosító</span><input name="belso_azon" value="${o.belso_azon || ''}" placeholder="pl. MiniCRM azonosító"></label>
+          <label class="field"><span>Belső azonosító</span>${suggestInput('belso_azon', o.belso_azon, store.recentValues(store.state.db.Rendelesek, 'belso_azon', 'datum'), 'pl. MiniCRM azonosító')}</label>
           <label class="field"><span>Megjegyzés</span><input name="megjegyzes" value="${o.megjegyzes || ''}"></label></div>`,
         actions: [{ label: 'Mégse', value: null }, { label: 'Mentés', kind: 'primary',
           onClick: el => ({ belso_azon: el.querySelector('[name=belso_azon]').value, megjegyzes: el.querySelector('[name=megjegyzes]').value }) }],
@@ -424,18 +421,10 @@ export default {
   // A rendelési listán gépelés folyik → ott nem rajzolunk újra szinkronkor
   get liveUpdate() { return ui.tab !== 'lista'; },
   render(root, params, ctx) {
-    if (draft === undefined) {
-      root.innerHTML = '<p class="muted">Betöltés…</p>';
-      loading = loading || store.drafts.get('javaslat').then(d => {
-        draft = d && d.list ? d : { list: {}, skip: {} }; // régi formátumú vázlat eldobása
-      });
-      loading.then(() => ctx.rerender());
-      return;
-    }
-    const db = store.state.db;
-    const openCount = db.Rendelesek.filter(o => ['nyitott', 'reszben'].includes(L.orderInfo(db, o).statusz)).length;
-    const sugCount = Object.values(store.state.stock).filter(s => s.javaslat > 0 && !draft.list[s.tetel_id] && store.get('Tetelek', s.tetel_id)?.aktiv).length;
-    const listCount = Object.keys(draft.list).filter(id => store.get('Tetelek', id)).length;
+    if (!slot.ready(root, ctx)) return;
+    const openCount = store.openOrders().length;
+    const sugCount = Object.values(store.state.stock).filter(s => s.javaslat > 0 && !slot.draft.list[s.tetel_id] && store.get('Tetelek', s.tetel_id)?.aktiv).length;
+    const listCount = Object.keys(slot.draft.list).filter(id => store.get('Tetelek', id)).length;
     root.innerHTML = String(html`
       <div class="page-head"><h1>Rendelés</h1>
         <div class="actions"><button class="btn" data-print>Nyomtatás</button></div></div>

@@ -5,19 +5,18 @@ import { html, fmtNum, fmtDate, matcher, compare, sortArrow, dateStamp, parseNum
 import { attachPicker, itemSelector, templates, tplIds } from './common.js';
 
 const L = window.RaktarLogic;
-let draft;            // undefined: még nincs betöltve, null: nincs folyamatban lévő leltár
-let loading = null;
-let finishing = false; // lezárás folyamatban (dupla koppintás ellen)
+// Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } } }
+const slot = store.draftSlot('leltar');
 const ui = { q: '', onlyMissing: false, cats: new Set(), whs: new Set() };
 
-const save = () => store.drafts.set('leltar', draft);
+const save = slot.save;
 
 const sortItems = ids => ids.map(id => store.get('Tetelek', id)).filter(Boolean).sort(store.byPlace).map(t => t.tetel_id);
 
 function start(ids, label) {
   if (!ids.length) { toast('Nincs leltározandó tétel.', 'warn'); return; }
   const d = new Date();
-  draft = {
+  slot.draft = {
     id: `LT-${dateStamp(d)}-${L.newId('', 4)}`,
     label, started: d.toISOString(), items: sortItems(ids), counts: {},
   };
@@ -96,7 +95,7 @@ function showSession(bizonylat) {
         <td class="c-main">${r.t.megnevezes}<div class="sub">${store.placeLabel(r.t)}</div></td>
         <td class="num c-f1" data-l="Nyilvántartott">${r.elotte === null ? '–' : fmtNum(r.elotte)}</td>
         <td class="num c-f2" data-l="Megszámolt"><b>${fmtNum(r.mennyiseg)}</b> <span class="small muted">${r.t.mertekegyseg}</span></td>
-        <td class="num c-f3" data-l="Eltérés">${r.elteres ? html`<span style="color:${r.elteres < 0 ? 'var(--warn)' : 'var(--info)'}">${r.elteres > 0 ? '+' : ''}${fmtNum(r.elteres)}</span>` : html`<span class="muted">${r.elteres === 0 ? '✓' : '–'}</span>`}</td>
+        <td class="num c-f3" data-l="Eltérés">${r.elteres ? html`<span class="${diffClass(r.elteres, r.elotte)}">${fmtDiff(r.elteres)}</span>` : html`<span class="muted">${r.elteres === 0 ? '✓' : '–'}</span>`}</td>
       </tr>`)}</tbody></table></div>
       ${list.length ? '' : html`<div class="empty small">Nincs találat.</div>`}`;
   };
@@ -114,7 +113,7 @@ function showSession(bizonylat) {
       <div class="toolbar" style="margin-top:1rem">
         <input type="search" data-q placeholder="Keresés a tételek között…">
         <label class="check small"><input type="checkbox" data-diff> Csak az eltérők</label>
-        ${help('Nyilvántartott: amennyi a gép szerint a leltár pillanatában volt (az előző leltár + azóta beérkezett). Az eltérés a leltárak közötti fogyást vagy egy rögzítési hibát mutat. Az első leltárnál nincs összehasonlítási alap.')}
+        ${help(html`Nyilvántartott: amennyi a gép szerint a leltár pillanatában volt (az előző leltár + azóta beérkezett). Az eltérés a leltárak közötti fogyást vagy egy rögzítési hibát mutat. Az első leltárnál nincs összehasonlítási alap.<br><br><span class="t-ok">Zöld</span>: több volt a nyilvántartottnál (többlet). <span class="t-warn">Narancs</span>: hiány. <span class="t-err">Piros</span>: nagy hiány (5 egységnél és 30%-nál több).`)}
         <span class="grow"></span>
         <button class="btn btn-sm" data-copy title="Táblázatként a vágólapra (Excelbe illeszthető)">Másolás táblázatként</button>
       </div>
@@ -242,29 +241,32 @@ function renderStart(root, ctx) {
     if (b.dataset.a === 'cat') start(selected.map(t => t.tetel_id), selText || 'Egyedi');
     ctx.rerender();
   };
-  root.onkeydown = e => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    if (e.target.dataset.a === 'catpick') { e.preventDefault(); openPicker(e.target); }
-    if (e.target.dataset.a === 'custom') { e.preventDefault(); openCustom(e.target); }
-    if (e.target.dataset.lt) { e.preventDefault(); showSession(e.target.dataset.lt); }
-  };
 }
 
+/**
+ * Leltáreltérés színe az előjel szerint: több van (többlet) → zöld; kevesebb (hiány) → narancs,
+ * nagy hiány (> 5 egység és > 30%) → piros. A számlálásnál és a leltár részleteinél egyformán.
+ */
+function diffClass(d, nyilv) {
+  if (d > 0) return 't-ok';
+  return -d > Math.max(5, (nyilv || 0) * 0.3) ? 't-err' : 't-warn';
+}
+const fmtDiff = d => `${d > 0 ? '+' : ''}${fmtNum(d)}`;
+
 function diffText(id) {
-  const c = draft.counts[id];
+  const c = slot.draft.counts[id];
   if (!c) return '';
   const st = store.state.stock[id];
   const t = store.get('Tetelek', id);
   const d = L.round3(c.q - st.keszlet);
   if (!d) return html`<span class="t-ok">✓ Egyezik a nyilvántartással</span>`;
-  const big = Math.abs(d) > Math.max(5, st.keszlet * 0.3);
-  return html`<span style="color:${big ? 'var(--err)' : 'var(--warn)'}">Eltérés a nyilvántartotthoz: ${d > 0 ? '+' : ''}${fmtNum(d)} ${t.mertekegyseg}</span>`;
+  return html`<span class="${diffClass(d, st.keszlet)}">${d > 0 ? 'Többlet' : 'Hiány'} a nyilvántartotthoz képest: ${fmtDiff(d)} ${t.mertekegyseg}</span>`;
 }
 
 function rowHtml(id) {
   const t = store.get('Tetelek', id);
   const st = store.state.stock[id];
-  const c = draft.counts[id];
+  const c = slot.draft.counts[id];
   return html`<div class="count-row ${c ? 'done' : ''}" data-id="${id}">
     <div><div class="name">${t.megnevezes}</div>
       <div class="meta">${store.placeLabel(t)} · nyilvántartott: ${fmtNum(st.keszlet)} ${t.mertekegyseg} · előző leltár: ${fmtDate(st.leltarDatum)}</div></div>
@@ -274,7 +276,7 @@ function rowHtml(id) {
 }
 
 function renderCount(root, ctx) {
-  const ids = draft.items.filter(id => store.get('Tetelek', id));
+  const ids = slot.draft.items.filter(id => store.get('Tetelek', id));
   let lastPolc = null;
   const parts = [];
   for (const id of ids) {
@@ -283,14 +285,14 @@ function renderCount(root, ctx) {
     parts.push(rowHtml(id));
   }
   root.innerHTML = String(html`
-    <div class="page-head"><h1>Leltár: ${draft.label}</h1>
-      <span class="badge badge-muted">${draft.id}</span><span class="small muted">indítva: ${fmtDate(draft.started, true)}</span></div>
+    <div class="page-head"><h1>Leltár: ${slot.draft.label}</h1>
+      <span class="badge badge-muted">${slot.draft.id}</span><span class="small muted">indítva: ${fmtDate(slot.draft.started, true)}</span></div>
     <div class="card">
-      <div class="card-head sticky-bar" style="top:var(--top-h)">
-        <div class="toolbar" style="margin:0;flex:1">
+      <div class="card-head sticky-search">
+        <div class="toolbar head-main" style="margin:0">
           <input type="search" id="q" placeholder="Szűrés a listában…" value="${ui.q}">
-          <label class="check small"><input type="checkbox" id="miss" ${ui.onlyMissing ? 'checked' : ''}> Csak a még nem számoltak</label>
-          <div class="picker" style="flex:1 1 220px;max-width:320px"><input id="add" placeholder="+ Tétel hozzáadása a leltárhoz…" autocomplete="off"></div>
+          <label class="check small nowrap"><input type="checkbox" id="miss" ${ui.onlyMissing ? 'checked' : ''}> Csak a számolatlanok</label>
+          <div class="picker" style="flex:1 1 110px;max-width:320px"><input id="add" placeholder="+ Tétel hozzáadása" title="Tétel hozzáadása a leltárhoz" autocomplete="off"></div>
         </div>
       </div>
       <div class="count-list" id="list">${parts}</div>
@@ -304,7 +306,7 @@ function renderCount(root, ctx) {
 
   const list = root.querySelector('#list');
   const progress = () => {
-    const done = ids.filter(id => draft.counts[id]).length;
+    const done = ids.filter(id => slot.draft.counts[id]).length;
     root.querySelector('#prog').textContent = `${done} / ${ids.length}`;
     root.querySelector('#bar').style.width = (ids.length ? done / ids.length * 100 : 0) + '%';
     // Csak akkor nagy a lezáró sáv, ha minden tétel megvan
@@ -315,7 +317,7 @@ function renderCount(root, ctx) {
     const groups = {};
     list.querySelectorAll('.count-row').forEach(row => {
       const t = store.get('Tetelek', row.dataset.id);
-      const show = match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) && !(ui.onlyMissing && draft.counts[row.dataset.id]);
+      const show = match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) && !(ui.onlyMissing && slot.draft.counts[row.dataset.id]);
       row.hidden = !show;
       const g = t.polc || t.raktar ? store.placeLabel(t) : 'Polc nélkül';
       groups[g] = groups[g] || show;
@@ -331,11 +333,11 @@ function renderCount(root, ctx) {
     const id = row.dataset.id;
     const v = e.target.value.trim();
     const q = parseNum(v);
-    if (v === '') delete draft.counts[id];
-    else if (!isNaN(q) && q >= 0) draft.counts[id] = { q, at: new Date().toISOString() };
+    if (v === '') delete slot.draft.counts[id];
+    else if (!isNaN(q) && q >= 0) slot.draft.counts[id] = { q, at: new Date().toISOString() };
     else { e.target.style.borderColor = 'var(--err)'; return; }
     e.target.style.borderColor = '';
-    row.classList.toggle('done', !!draft.counts[id]);
+    row.classList.toggle('done', !!slot.draft.counts[id]);
     row.querySelector('.diff').innerHTML = String(diffText(id));
     save();
     progress();
@@ -353,9 +355,9 @@ function renderCount(root, ctx) {
   root.querySelector('#miss').addEventListener('change', e => { ui.onlyMissing = e.target.checked; applyFilter(); });
   attachPicker(root.querySelector('#add'), {
     items: store.activeItems,
-    exclude: () => new Set(draft.items),
+    exclude: () => new Set(slot.draft.items),
     onPick: t => {
-      draft.items = sortItems([...draft.items, t.tetel_id]);
+      slot.draft.items = sortItems([...draft.items, t.tetel_id]);
       save();
       ctx.rerender();
       const inp = root.querySelector(`.count-row[data-id="${t.tetel_id}"] input`);
@@ -368,14 +370,12 @@ function renderCount(root, ctx) {
     if (!b) return;
     if (b.dataset.a === 'discard') {
       if (!(await confirmDialog('Leltár elvetése', 'A beírt értékek elvesznek. Biztosan elveted?', 'Elvetés', 'danger'))) return;
-      draft = null; await store.drafts.del('leltar'); ctx.rerender();
+      await slot.clear(); ctx.rerender();
     }
     if (b.dataset.a === 'finish') {
-      if (finishing) return;
-      const counted = ids.filter(id => draft.counts[id]);
+      const counted = ids.filter(id => slot.draft.counts[id]);
       if (!counted.length) return toast('Még egy tételt sem számoltál meg.', 'warn');
-      finishing = true;
-      try { await finish(counted); } finally { finishing = false; }
+      await slot.once(() => finish(counted));
     }
   };
 
@@ -402,13 +402,12 @@ function renderCount(root, ctx) {
       // Visszamenőleges leltár: minden tétel a választott napon (déli időponttal), a bizonylat is ezt a dátumot kapja
       const past = datum !== today;
       const pastIso = past ? dateInputToIso(datum) : null;
-      const bizonylat = past ? `LT-${datum.replace(/-/g, '')}-${draft.id.split('-').pop()}` : draft.id;
+      const bizonylat = past ? `LT-${datum.replace(/-/g, '')}-${slot.draft.id.split('-').pop()}` : slot.draft.id;
       try {
         await store.enqueue({ type: 'mozgasok', rows: counted.map(id => ({
-          mozgas_id: L.newId('M', 12), datum: past ? pastIso : draft.counts[id].at, tipus: 'LELTAR', tetel_id: id,
-          mennyiseg: draft.counts[id].q, bizonylat, megjegyzes: past ? 'Utólag rögzített leltár' : '' })) });
-        draft = null;
-        await store.drafts.del('leltar');
+          mozgas_id: L.newId('M', 12), datum: past ? pastIso : slot.draft.counts[id].at, tipus: 'LELTAR', tetel_id: id,
+          mennyiseg: slot.draft.counts[id].q, bizonylat, megjegyzes: past ? 'Utólag rögzített leltár' : '' })) });
+        await slot.clear();
         toast('Leltár rögzítve', 'ok');
         ctx.go('attekinto');
       } catch (x) { toast(x.message, 'error', 6000); }
@@ -416,14 +415,9 @@ function renderCount(root, ctx) {
 }
 
 export default {
-  get liveUpdate() { return !draft; },
+  get liveUpdate() { return !slot.draft; },
   render(root, params, ctx) {
-    if (draft === undefined) {
-      root.innerHTML = '<p class="muted">Betöltés…</p>';
-      loading = loading || store.drafts.get('leltar').then(d => { draft = d || null; });
-      loading.then(() => ctx.rerender());
-      return;
-    }
-    if (!draft) renderStart(root, ctx); else renderCount(root, ctx);
+    if (!slot.ready(root, ctx)) return;
+    if (!slot.draft) renderStart(root, ctx); else renderCount(root, ctx);
   },
 };

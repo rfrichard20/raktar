@@ -32,7 +32,9 @@ var RaktarLogic = (function () {
     Mozgasok: { key: 'mozgas_id', cols: [
       ['mozgas_id', 'str'], ['datum', 'date'], ['tipus', 'str'], ['tetel_id', 'str'], ['mennyiseg', 'num'],
       ['bizonylat', 'str'], ['rendeles_sor_id', 'str'], ['felhasznalo', 'str'], ['rogzitve', 'date'],
-      ['megjegyzes', 'str']] },
+      ['megjegyzes', 'str'],
+      // Kivétnél: ki vitte el (felhasználó e-mail-címe vagy szabad szöveg) és melyik munkára (pl. MiniCRM azonosító)
+      ['atvevo', 'str'], ['munka', 'str']] },
     Rendelesek: { key: 'rendeles_id', cols: [
       ['rendeles_id', 'str'], ['datum', 'date'], ['beszallito_id', 'str'], ['lezarva', 'bool'],
       ['letrehozta', 'str'], ['megjegyzes', 'str'], ['modositva', 'date'],
@@ -255,6 +257,8 @@ var RaktarLogic = (function () {
         if (r.tipus !== 'BEERKEZES') fail('Rendelési sorhoz csak beérkezés köthető.');
       }
       if (!r.datum) r.datum = now;
+      // Jövőbeli dátum torzítaná a készletet (a felület sem engedi); 1 nap tűrés az eltérő órák / időzónák miatt
+      if (Date.parse(r.datum) > Date.parse(now) + 86400000) fail('A mozgás dátuma nem lehet a jövőben (' + t.megnevezes + ').');
       r.felhasznalo = user.email;
       r.rogzitve = now;
       fresh.push(r);
@@ -513,17 +517,13 @@ var RaktarLogic = (function () {
   }
 
   /**
-   * Felhasználás becslése a leltárakból (a kivét nincs mindig rögzítve, így a leltárkori hiány = fogyás).
+   * Felhasználás: a rögzített kivétek + a leltárkori hiány (a nem rögzített kivét a leltárnál derül ki).
    * Tételenként: fogyas (az időszakban), tobblet (leltárkor több volt, mint a nyilvántartott),
-   * napi átlag (a leltárak közötti időszakra vetítve).
+   * napi átlag (az első és utolsó mérés közötti időszakra vetítve).
    */
   function usageStats(db, fromIso) {
     var DAY = 86400000, res = {}, run = {}, lastInv = {};
-    var moves = (db.Mozgasok || []).slice().sort(function (a, b) {
-      if (a.datum !== b.datum) return a.datum < b.datum ? -1 : 1;
-      return a.rogzitve < b.rogzitve ? -1 : a.rogzitve > b.rogzitve ? 1 : 0;
-    });
-    moves.forEach(function (m) {
+    sortedMoves(db).forEach(function (m) {
       var id = m.tetel_id, q = toNum(m.mennyiseg), cur = run[id] || 0;
       var r = res[id] = res[id] || { fogyas: 0, tobblet: 0, kivet: 0, leltarDb: 0, spanStart: null, spanEnd: null };
       var inWin = m.datum >= fromIso;
@@ -622,6 +622,23 @@ var RaktarLogic = (function () {
       seen[id] = 1;
     });
     return rows;
+  }
+
+  /**
+   * Kivételek bizonylatonként (egy kivét = egy alkalommal kiadott tételek), a legújabb elöl.
+   * { bizonylat, datum, atvevo, munka, megjegyzes, felhasznalo, rogzitve, sorok: [mozgás, …] }
+   */
+  function withdrawals(db) {
+    var map = {};
+    (db.Mozgasok || []).forEach(function (m) {
+      if (m.tipus !== 'KIVET') return;
+      var k = m.bizonylat || m.mozgas_id;
+      var w = map[k] = map[k] || { bizonylat: k, datum: m.datum, atvevo: m.atvevo, munka: m.munka, megjegyzes: m.megjegyzes,
+        felhasznalo: m.felhasznalo, rogzitve: m.rogzitve, sorok: [] };
+      w.sorok.push(m);
+      if (m.datum > w.datum) w.datum = m.datum;
+    });
+    return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return a.datum < b.datum ? 1 : -1; });
   }
 
   /* ---------- E-mail sablonok ---------- */
@@ -913,7 +930,7 @@ var RaktarLogic = (function () {
     sourcesFor: sourcesFor, roundPack: roundPack, generateDemoData: generateDemoData,
     orderMode: orderMode, productUrl: productUrl, usageStats: usageStats,
     LIST_TYPES: LIST_TYPES, LIST_FIELD: LIST_FIELD, listValues: listValues,
-    inventorySessions: inventorySessions, inventoryDetails: inventoryDetails,
+    inventorySessions: inventorySessions, inventoryDetails: inventoryDetails, withdrawals: withdrawals,
     EMAIL_TYPES: EMAIL_TYPES, EMAIL_FIELDS: EMAIL_FIELDS, DEFAULT_EMAIL_TEMPLATES: DEFAULT_EMAIL_TEMPLATES,
     emailTemplates: emailTemplates, emailItemList: emailItemList, fillTemplate: fillTemplate
   };

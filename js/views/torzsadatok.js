@@ -1,6 +1,6 @@
 // Törzsadatok (admin): tételek + beszerzési források, beszállítók, felhasználók.
 import * as store from '../store.js';
-import { html, fmtNum, fmtMoney, fmtDate, matcher, compare, sortArrow, modal, toast, formValues, parseNum, help, sec, confirmDialog } from '../ui.js';
+import { html, fmtNum, fmtMoney, fmtDate, matcher, compare, sortArrow, modal, toast, formValues, parseNum, help, sec, confirmDialog, suggestInput } from '../ui.js';
 import { itemSelector, tplIds, listSelect, bindListSelects } from './common.js';
 import { ICONS } from '../icons.js';
 
@@ -14,8 +14,8 @@ const ui = {
 const CYCLES = [[0, 'nincs'], [30, '30 nap (havonta)'], [60, '60 nap'], [90, '90 nap (negyedévente)'], [180, '180 nap (félévente)'], [365, '365 nap (évente)']];
 const ROLE_DESC = {
   admin: 'Minden funkció, törzsadatok és felhasználók kezelése.',
-  raktaros: 'Leltár, beérkezés, rendelés, korrekció, új tétel gyors felvétele.',
-  szerelo: 'Csak a készlet megtekintése – árak, rendelések, beszállítók és kimutatások nélkül (később: kivét rögzítése).',
+  raktaros: 'Leltár, beérkezés, kivét, rendelés, korrekció, új tétel gyors felvétele.',
+  szerelo: 'Készlet megtekintése és kivét rögzítése – árak, rendelések, beszállítók és kimutatások nélkül.',
   olvaso: 'Minden megtekintése (árak, rendelések, kimutatások), módosítás nélkül.',
 };
 
@@ -50,7 +50,7 @@ function editItem(t, ctx) {
         <label class="field"><span>Mértékegység</span>${listSelect('mertekegyseg', 'mertekegyseg', t.mertekegyseg, { defaultFirst: isNew })}</label>`)}
       ${sec('Tárolás', html`
         <label class="field"><span>Raktár</span>${listSelect('raktar', 'raktar', t.raktar)}</label>
-        <label class="field"><span>Polc / hely</span><input name="polc" value="${t.polc}" placeholder="pl. A1"></label>`)}
+        <label class="field"><span>Polc / hely</span>${suggestInput('polc', t.polc, store.shelves(), 'pl. A1')}</label>`)}
       ${sec('Készletszint és leltár', html`
         <label class="field"><span>Minimum készlet</span><input name="min_keszlet" inputmode="decimal" value="${numVal(isNew, t.min_keszlet)}" placeholder="0"></label>
         <label class="field"><span>Célkészlet (eddig pótolunk)</span><input name="cel_keszlet" inputmode="decimal" value="${numVal(isNew, t.cel_keszlet)}" placeholder="0"></label>
@@ -227,7 +227,7 @@ function columns(db) {
       ['min', 'Min / cél', t => t.min_keszlet, t => `${fmtNum(t.min_keszlet)} / ${fmtNum(t.cel_keszlet)}`, 'num'],
       ['ciklus', 'Leltár', t => t.leltar_ciklus_nap, t => (t.leltar_ciklus_nap ? t.leltar_ciklus_nap + ' nap' : '–'), 'num'],
       ['ertek', 'Készletérték', t => store.state.stock[t.tetel_id]?.ertek || 0, t => { const e = store.state.stock[t.tetel_id]?.ertek; return e ? fmtMoney(e) : '–'; }, 'num'],
-      ['forras', 'Források', t => srcCount(t.tetel_id), t => srcCount(t.tetel_id) || html`<span class="badge badge-warn">0</span>`, 'num'],
+      ['forras', 'Források', t => srcCount(t.tetel_id), t => { const n = srcCount(t.tetel_id); return html`<span class="badge badge-${n ? 'ok' : 'warn'}" title="${n ? 'Beszerzési források száma' : 'Nincs beszerzési forrás'}">${n}</span>`; }, 'num'],
     ],
     beszallitok: [
       ['nev', 'Név', b => b.nev, b => b.nev, 'main'],
@@ -289,7 +289,7 @@ function tableHtml() {
   const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id', emailek: 'sablon_id' }[ui.tab];
   // Mobilon kártyák: a „main” oszlop a kártya címe, a többi címkézett mező 3 oszlopba tördelve
   return html`<table class="tbl cards nochk flow"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${sortArrow(c[0] === sk, sd)}</span></th>`)}</tr></thead>
-    <tbody>${list.length ? list.map(r => html`<tr class="click ${r.aktiv === false ? 'off' : ''}" data-id="${r[key]}">${cols.map(c =>
+    <tbody>${list.length ? list.map(r => html`<tr class="click ${r.aktiv === false ? 'off' : ''}" data-id="${r[key]}" tabindex="0">${cols.map(c =>
       html`<td class="${c[4] === 'main' ? 'c-main' : c[4] || ''}" ${c[4] === 'main' ? '' : html`data-l="${c[1]}"`}>${c[3](r)}</td>`)}</tr>`)
       : html`<tr><td colspan="${cols.length}" class="empty">Nincs a szűrésnek megfelelő elem.</td></tr>`}</tbody></table>
     <div class="tbl-foot">${list.length} elem</div>`;

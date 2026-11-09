@@ -2,7 +2,12 @@
 import * as store from '../store.js';
 import { html, fmtDate, confirmDialog, toast } from '../ui.js';
 
+import { navRoutes } from '../app.js';
+import { ICONS } from '../icons.js';
+
 const L = window.RaktarLogic;
+const NAV_PICK = store.NAV_MAX;      // ennyi menüpont választható ki
+const NAV_FIT = store.NAV_MAX + 1;   // ennyi még a „Több” menü nélkül is elfér – efölött van értelme a beállításnak
 
 const OP_LABEL = {
   mozgasok: op => {
@@ -50,7 +55,23 @@ export default {
           ${[['auto', 'Automatikus'], ['light', 'Világos'], ['dark', 'Sötét']].map(([v, l]) => html`
             <button class="chip ${window.RaktarTheme.get() === v ? 'on' : ''}" data-a="theme" data-v="${v}">${l}</button>`)}
         </div>
+        <label class="check" style="margin-top:.75rem"><input type="checkbox" data-a="help" ${store.getPref('help', true) ? 'checked' : ''}>
+          Súgó ikonok (?) megjelenítése</label>
+        <p class="small muted" style="margin:.25rem 0 0 1.75rem">Kikapcsolva a magyarázatok és jelmagyarázatok nem látszanak; bármikor visszakapcsolható.</p>
       </div>
+
+      ${navRoutes().length > NAV_FIT ? html`<div class="card">
+        <div class="card-head"><h2 class="grow">Menü sorrendje</h2>
+          ${store.getNavOrder() ? html`<button class="link-btn small" data-a="navreset">Alapértelmezett</button>` : ''}</div>
+        <p class="small muted card-note">A menüpontok ebben a sorrendben látszanak. Mobilon az első ${NAV_PICK} az alsó sávban van, a többi a „Több” menüben. Csak ezen az eszközön érvényes.</p>
+        ${navRoutes().map((r, i, all) => html`
+          ${i === NAV_PICK ? html`<div class="list-sep">„Több” menüben</div>` : ''}
+          <div class="list-row">${ICONS[r.icon]}<span class="grow">${r.label}</span>
+            <span class="row-icons">
+              <button class="icon-btn" data-a="navup" data-i="${i}" ${i ? '' : 'disabled'} title="Feljebb" aria-label="${r.label} feljebb">${ICONS.up}</button>
+              <button class="icon-btn" data-a="navdown" data-i="${i}" ${i < all.length - 1 ? '' : 'disabled'} title="Lejjebb" aria-label="${r.label} lejjebb">${ICONS.down}</button>
+            </span></div>`)}
+      </div>` : ''}
 
       <div class="card">
         <div class="card-head"><h2>Feltöltésre vár</h2><span class="badge badge-${s.outbox.length ? 'warn' : 'ok'}">${s.outbox.length}</span></div>
@@ -88,6 +109,14 @@ export default {
       if (!b || b.type === 'checkbox') return;
       const a = b.dataset.a;
       if (a === 'sync') store.sync();
+      if (a === 'navup' || a === 'navdown') {
+        if (b.disabled) return;
+        const keys = navRoutes().map(r => r.key);
+        const i = Number(b.dataset.i), j = a === 'navup' ? i - 1 : i + 1;
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+        store.setNavOrder(keys);
+      }
+      if (a === 'navreset') store.setNavOrder(null);
       if (a === 'theme') {
         window.RaktarTheme.set(b.dataset.v);
         root.querySelectorAll('[data-a=theme]').forEach(x => x.classList.toggle('on', x === b));
@@ -109,6 +138,7 @@ export default {
       }
     };
     root.onchange = e => {
+      if (e.target.dataset.a === 'help') store.setPref('help', e.target.checked);
       if (e.target.dataset.a === 'offline') {
         demo.offline = e.target.checked;
         toast(e.target.checked ? 'Szimulált offline mód BE' : 'Szimulált offline mód KI – szinkronizálás…', 'info');

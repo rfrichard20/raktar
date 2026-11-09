@@ -66,7 +66,7 @@ function bodyHtml(list) {
   return html`${list.map(t => {
     const s = st[t.tetel_id];
     const me = t.mertekegyseg;
-    return html`<tr class="click st-row-${s.statusz}" data-id="${t.tetel_id}" ${s.statusz !== 'ok' ? html`title="${STATUS_TEXT[s.statusz]}"` : ''}>
+    return html`<tr class="click st-row-${s.statusz}" data-id="${t.tetel_id}" tabindex="0" ${s.statusz !== 'ok' ? html`title="${STATUS_TEXT[s.statusz]}"` : ''}>
       <td class="c-main">${t.megnevezes}<div class="sub">${t.kategoria}</div></td>
       <td class="c-meta small-m">${store.placeLabel(t)}</td>
       <td class="num c-f1" data-l="Készlet"><b>${fmtNum(s.keszlet)}</b> <span class="muted small">${me}</span></td>
@@ -102,14 +102,12 @@ export default {
       <div class="page-head"><h1>Készlet áttekintő</h1>${help(html`<b>Jelölések</b><br><span class="legend-bar st-hiany"></span> piros csík: hiány – a készlet a minimum alatt<br><span class="legend-bar st-figyelem"></span> sárga csík: fogyóban – közel a minimumhoz<br><span class="due-dot"></span> esedékes leltár (lejárt a leltári ciklus)<br><br>A felső számlálókra kattintva szűrhetsz; a sorra kattintva megnyílik a tétel adatlapja.`)}</div>
       <div class="stats" id="stats"></div>
       <div class="card">
-        <div class="card-head">
-          <div class="toolbar" style="margin:0;flex:1">
-            <input type="search" id="q" placeholder="Keresés név, polc, kategória szerint…" value="${ui.q}">
-            <select id="cat"><option value="">Minden kategória</option>${store.categories().map(c => html`<option ${c === ui.cat ? 'selected' : ''}>${c}</option>`)}</select>
-            ${store.warehouses().length > 1 ? html`<select id="wh"><option value="">Minden raktár</option>${store.warehouses().map(w => html`<option ${w === ui.wh ? 'selected' : ''}>${w}</option>`)}</select>` : ''}
-          </div>
-          <span class="muted small" id="count"></span>
+        <div class="toolbar card-toolbar">
+          <input type="search" id="q" placeholder="Keresés név, polc, kategória szerint…" value="${ui.q}">
+          <select id="cat"><option value="">Minden kategória</option>${store.categories().map(c => html`<option ${c === ui.cat ? 'selected' : ''}>${c}</option>`)}</select>
+          ${store.warehouses().length > 1 ? html`<select id="wh"><option value="">Minden raktár</option>${store.warehouses().map(w => html`<option ${w === ui.wh ? 'selected' : ''}>${w}</option>`)}</select>` : ''}
         </div>
+        <div class="tbl-foot" id="count"></div>
         <div class="table-wrap">
           <table class="tbl cards fixed overview nochk">
             <colgroup>${COLS.map(c => html`<col class="${c[2].includes('m-hide') ? 'm-hide' : ''}" ${c[3] ? html`style="width:${c[3]}"` : ''}>`)}</colgroup>

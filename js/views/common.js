@@ -1,7 +1,7 @@
 // Több nézetben használt elemek.
 import * as store from '../store.js';
 import { ICONS } from '../icons.js';
-import { html, raw, esc, matcher, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, copyText, help, STATUS_TEXT, fmtMoney } from '../ui.js';
+import { html, raw, esc, matcher, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, copyText, help, STATUS_TEXT, fmtMoney, todayInput, dateInputToIso, dateStamp, suggestInput } from '../ui.js';
 
 const L = window.RaktarLogic;
 
@@ -31,6 +31,8 @@ export function attachPicker(input, opts) {
       : html`<div class="empty small">Nincs ilyen tétel a törzsadatokban.</div>`}
       ${canCreate ? html`<button type="button" data-new class="picker-new">+ Új tétel felvétele: „${q}”</button>` : ''}`);
     wrap.appendChild(list);
+    // Billentyűvel lépkedve a kijelölt sor mindig látszódjon (a lista görgetődik vele)
+    list.querySelector('.hl')?.scrollIntoView({ block: 'nearest' });
     list.addEventListener('mousedown', e => e.preventDefault());
     list.addEventListener('click', e => {
       const b = e.target.closest('[data-i]');
@@ -74,7 +76,7 @@ export function quickAddItem(name = '', supplierId = '') {
         <label class="field"><span>Mértékegység</span>${listSelect('mertekegyseg', 'mertekegyseg', '', { defaultFirst: true })}</label>`)}
       ${sec('Tárolás és készletszint', html`
         <label class="field"><span>Raktár</span>${listSelect('raktar', 'raktar', '')}</label>
-        <label class="field"><span>Polc / hely</span><input name="polc" placeholder="pl. A1"></label>
+        <label class="field"><span>Polc / hely</span>${suggestInput('polc', '', store.shelves(), 'pl. A1')}</label>
         <label class="field"><span>Minimum készlet</span><input name="min_keszlet" inputmode="decimal" placeholder="0"></label>
         <label class="field"><span>Célkészlet</span><input name="cel_keszlet" inputmode="decimal" placeholder="0"></label>`)}
       ${sec(html`Beszerzési forrás <span style="font-weight:400;text-transform:none;letter-spacing:0">(opcionális)</span>`, html`
@@ -306,6 +308,7 @@ export function emailDialog({ supId, lines, rid = '', tipus = 'rendeles', title 
   return m;
 }
 
+
 /* ---------- Mozgástípus ikonok ---------- */
 const MOVE_SVG = {
   LELTAR: '<path d="M5 9h14M5 15h14"/>',            // „=” – megszámolt érték
@@ -323,6 +326,73 @@ export function moveQty(m) {
   return n;
 }
 
+/* ---------- Anyagkivét (Kivét oldal és gyors kivét az adatlapról) ---------- */
+/**
+ * A kivét fejadatai űrlapmezőként: átvevő, munka / projekt, dátum, megjegyzés.
+ * v: korábbi értékek (pl. vázlatból). Az átvevőnél és a munkánál a korábbi értékek felajánlva.
+ */
+export function kivetFields(v = {}) {
+  const db = store.state.db;
+  const users = (db.Felhasznalok || []).map(u => u.nev || u.email).sort((a, b) => a.localeCompare(b, 'hu'));
+  const munkak = store.recentValues(db.Mozgasok.filter(m => m.tipus === 'KIVET'), 'munka', 'datum');
+  return html`
+    <label class="field"><span>Átvevő *</span>${suggestInput('atvevo', v.atvevo ?? store.userName(store.state.user.email), users, 'ki vitte el')}</label>
+    <label class="field"><span>Munka / projekt</span>${suggestInput('munka', v.munka, munkak, 'pl. MiniCRM azonosító')}</label>
+    <label class="field"><span>Dátum</span><input type="date" name="datum" value="${v.datum || todayInput()}" max="${todayInput()}"></label>
+    <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" value="${v.megjegyzes || ''}" placeholder="opcionális"></label>`;
+}
+
+/**
+ * Kivét rögzítése. items: [{ tetel_id, q }], meta: { atvevo, munka, datum (ÉÉÉÉ-HH-NN), megjegyzes }.
+ * Ellenőriz (átvevő, mennyiségek), túlkivétnél megerősítést kér. Visszaad: true, ha rögzítve; különben false.
+ */
+export async function saveKivet(items, meta) {
+  const atvevoText = String(meta.atvevo || '').trim();
+  if (!atvevoText) { toast('Add meg, ki vitte el (átvevő).', 'error'); return false; }
+  if (!items.length) { toast('Adj hozzá legalább egy tételt.', 'warn'); return false; }
+  for (const it of items) {
+    if (!(it.q > 0)) { toast('Hiányzó vagy hibás mennyiség: ' + store.itemOrStub(it.tetel_id).megnevezes, 'error'); return false; }
+  }
+  if (meta.datum && meta.datum > todayInput()) { toast('A dátum nem lehet a jövőben.', 'error'); return false; }
+  // Túlkivét: engedjük (a nyilvántartás eltérhet a valóságtól), de jelezzük
+  const over = items.filter(it => it.q > (store.state.stock[it.tetel_id]?.keszlet ?? 0));
+  if (over.length && !(await confirmDialog('Több, mint a nyilvántartott készlet',
+    `${over.map(it => store.itemOrStub(it.tetel_id).megnevezes).join(', ')}: a kivett mennyiség több, mint a nyilvántartott készlet. ` +
+    'A kivét rögzíthető, a készlet negatívba fordul; a következő leltár rendezi. Rögzíted?', 'Rögzítés'))) return false;
+  // Átvevő: ha egy felhasználó nevét vagy e-mail-címét adták meg, az e-mail-cím kerül tárolásra (névváltozás után is azonosítható)
+  const lower = atvevoText.toLowerCase();
+  const user = (store.state.db.Felhasznalok || []).find(u => String(u.nev || '').toLowerCase() === lower || u.email === lower);
+  const datum = dateInputToIso(meta.datum || todayInput());
+  const bizonylat = `KI-${dateStamp(new Date(datum))}-${L.newId('', 4)}`;
+  try {
+    await store.enqueue({ type: 'mozgasok', rows: items.map(it => ({
+      mozgas_id: L.newId('M', 12), datum, tipus: 'KIVET', tetel_id: it.tetel_id, mennyiseg: it.q, bizonylat,
+      atvevo: user ? user.email : atvevoText, munka: String(meta.munka || '').trim(), megjegyzes: String(meta.megjegyzes || '').trim() })) });
+    toast('Kivét rögzítve', 'ok');
+    return true;
+  } catch (x) { toast(x.message, 'error', 6000); return false; }
+}
+
+/** Gyors kivét egy tételből (a tétel adatlapjáról). */
+function showKivet(t) {
+  const st = store.state.stock[t.tetel_id];
+  modal({
+    title: 'Kivét – ' + t.megnevezes,
+    body: html`
+      <p class="small muted">Nyilvántartott készlet: <b>${fmtNum(st.keszlet)} ${t.mertekegyseg}</b> · ${store.placeLabel(t)}</p>
+      <div class="form-grid">
+        <label class="field"><span>Mennyiség (${t.mertekegyseg}) *</span><input name="q" inputmode="decimal" placeholder="${t.mertekegyseg}"></label>
+        ${kivetFields()}
+      </div>`,
+    actions: [{ label: 'Mégse', value: null }, {
+      label: 'Kivét rögzítése', kind: 'primary', onClick: async el => {
+        const v = formValues(el);
+        return (await saveKivet([{ tetel_id: t.tetel_id, q: parseNum(v.q) }], v)) || false;
+      },
+    }],
+  });
+}
+
 /** Tétel részletei: készlet, források, mozgástörténet, korrekció. */
 export function showItemDetail(tetelId) {
   const db = store.state.db;
@@ -334,7 +404,7 @@ export function showItemDetail(tetelId) {
     .sort((a, b) => (a.datum < b.datum ? 1 : -1)).slice(0, 40);
   const lines = db.Rendeles_tetelek.filter(l => l.tetel_id === tetelId && !l.lezarva);
   const me = t.mertekegyseg || '';
-  const canKorr = store.can('raktaros'), canEdit = store.can('admin');
+  const canKivet = store.can('szerelo'), canKorr = store.can('raktaros'), canEdit = store.can('admin');
   const stLabel = STATUS_TEXT[st.statusz];
   const body = html`
     <div class="detail-head">
@@ -348,7 +418,7 @@ export function showItemDetail(tetelId) {
         </dl>
       </div>
       <dl class="facts">
-        <dt>Hely</dt><dd>${[t.raktar, t.polc].filter(Boolean).join(' · ') || '—'}</dd>
+        <dt>Hely</dt><dd>${store.placeLabel(t)}</dd>
         <dt>Kategória</dt><dd>${t.kategoria || '—'}</dd>
         <dt>Úton (rendelve)</dt><dd>${st.uton ? `${fmtNum(st.uton)} ${me}` : '–'}</dd>
         <dt>Utolsó leltár</dt><dd>${fmtDate(st.leltarDatum)}${st.leltarDatum ? html` <span class="muted">(${st.napjaLeltar} napja)</span>` : ''}${st.esedekes ? html` <span class="badge badge-warn">esedékes</span>` : ''}</dd>
@@ -357,9 +427,10 @@ export function showItemDetail(tetelId) {
         ${t.megjegyzes ? html`<dt>Megjegyzés</dt><dd>${t.megjegyzes}</dd>` : ''}
       </dl>
     </div>
-    ${canKorr || canEdit ? html`<div class="detail-actions">
-      ${canEdit ? html`<button class="btn btn-sm" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
+    ${canKivet ? html`<div class="detail-actions">
+      <button class="btn btn-sm" data-d="kivet">${ICONS.out} Kivét…</button>
       ${canKorr ? html`<button class="btn btn-sm" data-d="korr">Korrekció…</button>` : ''}
+      ${canEdit ? html`<button class="btn btn-sm" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
     </div>` : ''}
     ${store.can('rendeles') ? html`<h3 class="sec-h">Beszerzési források</h3>
     ${src.length ? html`<div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
@@ -380,7 +451,7 @@ export function showItemDetail(tetelId) {
       <thead><tr><th>Mennyiség</th><th>Bizonylat</th><th>Rögzítette</th><th class="num">Dátum</th></tr></thead>
       <tbody>${moves.map(m => html`<tr>
         <td class="c-main"><span class="move-date">${moveIcon(m.tipus)} <span class="move-q mv-${m.tipus}">${moveQty(m)}</span> <span class="small muted">${me}</span></span></td>
-        <td class="c-meta">${m.bizonylat}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}</td>
+        <td class="c-meta">${m.bizonylat}${m.atvevo || m.munka ? html`<div class="small">${[m.atvevo && `Átvevő: ${store.userName(m.atvevo)}`, m.munka && `Munka: ${m.munka}`].filter(Boolean).join(' · ')}</div>` : ''}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}</td>
         <td class="c-f2">${store.userName(m.felhasznalo)}</td>
         <td class="num c-f1">${fmtDate(m.datum, true)}</td>
       </tr>`)}</tbody></table></div>`
@@ -391,6 +462,7 @@ export function showItemDetail(tetelId) {
     if (!b) return;
     dlg.close();
     if (b.dataset.d === 'korr') showCorrection(t);
+    if (b.dataset.d === 'kivet') showKivet(t);
     if (b.dataset.d === 'edit') location.hash = '#/torzsadatok?tetel=' + encodeURIComponent(t.tetel_id);
   });
 }

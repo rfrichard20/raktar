@@ -136,7 +136,7 @@ function usageTable(rows) {
     ${list.length ? html`<div class="table-wrap"><table class="tbl cards nochk flow">
       <thead><tr><th>Tétel</th>${ui.usage === 'tobblet' ? html`<th class="num">Többlet</th>` : html`<th class="num">Felhasználás</th><th class="num">Havi átlag</th>`}
         <th class="num">Készlet</th><th class="num">Elég kb.</th><th class="num">${ui.usage === 'allo' ? 'Készletérték' : 'Érték'}</th></tr></thead>
-      <tbody>${list.slice(0, 15).map(r => html`<tr class="click" data-id="${r.t.tetel_id}">
+      <tbody>${list.slice(0, 15).map(r => html`<tr class="click" data-id="${r.t.tetel_id}" tabindex="0">
         <td class="c-main">${r.t.megnevezes}<div class="sub">${r.t.kategoria}</div></td>
         ${ui.usage === 'tobblet' ? html`<td class="num" data-l="Többlet">+${fmtNum(r.u.tobblet)} ${r.t.mertekegyseg}</td>`
           : html`<td class="num" data-l="Felhasználás">${fmtNum(Math.round(r.u.fogyas))} ${r.t.mertekegyseg}</td><td class="num" data-l="Havi átlag">${fmtNum(Math.round(r.havi * 10) / 10)}</td>`}
@@ -158,7 +158,7 @@ export default {
     const seg = (key, opts) => html`<div class="seg" role="group">${opts.map(([v, l]) => html`<button class="${ui[key] === v ? 'on' : ''}" data-set="${key}" data-v="${v}">${l}</button>`)}</div>`;
     root.innerHTML = String(html`
       <div class="page-head"><h1>Kimutatások</h1>
-        ${help('A készletérték az aktuális készlet × az elsődleges beszerzési forrás egységára. A felhasználás a leltárak közötti fogyásból becsült (amíg a kivét nincs rögzítve), ezért a leltárak gyakoriságától függ a pontossága.')}</div>
+        ${help('A készletérték az aktuális készlet × az elsődleges beszerzési forrás egységára. A felhasználás a rögzített kivétekből és a leltárkor talált hiányból adódik; a nem rögzített kivét csak a következő leltárnál derül ki, ezért a pontosság a leltárak gyakoriságától is függ.')}</div>
 
       <section class="report-section">
         <div class="report-section-head"><h2>Jelenlegi állapot</h2><span class="sub">a mai készlet alapján – az időszak nem befolyásolja</span></div>
