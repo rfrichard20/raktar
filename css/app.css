@@ -110,6 +110,8 @@ p { margin: 0 0 .75rem; }
 /* Másodlagos sor egy cellán / címen belül (pl. kategória a tétel neve alatt) – sosem félkövér */
 .sub { display: block; font-size: .875rem; color: var(--muted); font-weight: 400; }
 .hidden, [hidden] { display: none !important; }
+/* Csak képernyőolvasónak (pl. ikonoszlop fejléce) */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ===== Elrendezés ===== */
 .topbar {
@@ -315,6 +317,15 @@ input[type=search]::-webkit-search-cancel-button { display: none; -webkit-appear
 .search-clear:hover { background: var(--surface-2); color: var(--text); }
 .search-clear:active { background: var(--primary-soft); transform: translateY(-50%) scale(.9); }
 .search-clear:focus-visible { outline: 2px solid var(--primary); }
+/* Szűrő gomb a kereső mellett, checkboxos legördülővel (common.js → filterButton / openFilter).
+   Mobilon is egy sorban marad a keresővel. */
+.filter-btn { position: relative; padding: 0; width: 40px; flex: none; color: var(--muted); }
+.filter-btn svg { width: 18px; height: 18px; }
+.filter-btn.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.filter-n { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--on-primary); font-size: .7rem; line-height: 18px; text-align: center; }
+@media (max-width: 699px) {
+  .toolbar:has(> .filter-btn) > .search-wrap, .toolbar:has(> .filter-btn) > input[type=search] { flex: 1 1 0; }
+}
 /* Kártyán belüli szűrősáv (táblázat felett) és magyarázó sor */
 .card-toolbar { padding: .6rem 1rem; margin: 0; border-bottom: 1px solid var(--border); }
 .card-note { margin: 0; padding: .65rem 1rem; border-bottom: 1px solid var(--border); }
@@ -327,11 +338,18 @@ input[type=search]::-webkit-search-cancel-button { display: none; -webkit-appear
 
 /* Táblázat */
 .table-wrap { overflow-x: auto; }
-/* Asztalon a táblázat fejléce görgetéskor a felső sáv alatt marad. Ehhez a .table-wrap nem lehet saját
-   görgetődoboz (különben a fejléc ahhoz ragadna, nem az oldalhoz); ilyen szélességen a táblázatok elférnek. */
-@media (min-width: 900px) {
+/* Ahol táblázat látszik (asztal, álló tablet), a fejléce görgetéskor a felső sáv alatt marad. Ehhez a .table-wrap
+   nem lehet saját görgetődoboz (különben a fejléc ahhoz ragadna, nem az oldalhoz); ilyen szélességen a táblázatok elférnek. */
+@media (min-width: 700px) {
   .table-wrap { overflow-x: visible; }
+  /* Álló tableten a fejlécfelirat törhet, hogy a sok oszlopos táblázat is elférjen (nincs vízszintes görgetés) */
+  .table-wrap .tbl th { white-space: normal; }
   .tbl thead th { top: var(--top-h); z-index: 3; box-shadow: inset 0 -1px 0 var(--border); }
+}
+@media (min-width: 700px) and (max-width: 899px) {
+  /* Álló tablet: szűkebb cellamargó, a hosszú szó (e-mail, link) is törhet – így a sok oszlop is kifér */
+  .table-wrap .tbl th, .table-wrap .tbl td { padding-left: .45rem; padding-right: .45rem; }
+  .table-wrap .tbl td { overflow-wrap: anywhere; }
 }
 table.tbl { width: 100%; border-collapse: collapse; }
 .tbl th, .tbl td { padding: .55rem .75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
@@ -369,7 +387,7 @@ tr.click:focus-visible, [role=button]:focus-visible { outline: 2px solid var(--p
 .toolbar.sticky-search { background: var(--bg); padding: .5rem 0; margin-top: -.5rem; }
 /* Asztalon a táblázatfejléc is ragad: ilyenkor a kereső alá kerül, nem mögé
    (--head-h: a kártya ragadós fejlécének mért magassága, app.js → measureStickyHeads) */
-@media (min-width: 900px) {
+@media (min-width: 700px) {
   .card:has(> .sticky-search) .tbl thead th { top: calc(var(--top-h) + var(--head-h, 64px)); }
   body:has(.toolbar.sticky-search) .tbl thead th { top: calc(var(--top-h) + 56px); }
 }
@@ -537,7 +555,6 @@ th .star-ico { color: var(--muted); }
 .hero-status { font-size: .9rem; margin-top: .15rem; display: flex; align-items: center; color: var(--st); }
 /* Műveletgombok a fejléc alatt, a részletek előtt: később több gomb is elfér */
 .detail-actions { display: flex; gap: .5rem; flex-wrap: wrap; padding: .75rem 0; border-bottom: 1px solid var(--border); }
-.detail-actions .btn svg { width: 15px; height: 15px; }
 /* Minimum / cél közvetlenül a készlet alatt: minden készletszint egy helyen */
 .hero-levels { display: flex; gap: 1.5rem; margin: .6rem 0 0; padding-top: .55rem; border-top: 1px dashed var(--border); }
 .hero-levels dt { color: var(--muted); font-size: .8rem; }
@@ -560,6 +577,11 @@ th .star-ico { color: var(--muted); }
 .sec-h { margin-top: 1.25rem; }
 /* Mozgások táblázata */
 .move-date { display: inline-flex; align-items: center; gap: .5rem; }
+/* Dátumtartomány (tól – ig) egy sorban, pl. Mozgások → Egyéni időszak */
+.date-range { display: inline-flex; align-items: center; gap: .4rem; }
+.date-range input { width: auto; }
+/* Mozgások táblázata (common.js → movesTable): keskeny ikonoszlop elöl */
+.moves-tbl .c-ico { width: 38px; padding-right: 0; }
 
 /* Asztalon hely a sor eleji állapotcsíknak (mobilon a kártya saját margója adja) */
 @media (min-width: 700px) { .tbl.overview td:first-child { padding-left: 1rem; } }
@@ -567,11 +589,11 @@ th .star-ico { color: var(--muted); }
   /* Adatlap: források, nyitott rendelések */
   .tbl.cards.detail-tbl tbody tr { grid-template-areas: "main main act" "f1 f2 f3" "meta meta meta" "f4 f4 f4"; }
   .tbl.cards.detail-tbl td.c-act { text-align: right; white-space: nowrap; }
-  /* Mozgások: 1. sor ikon + dátum | mennyiség, 2. sor bizonylat | rögzítette */
-  .tbl.cards.moves-tbl tbody tr { grid-template-areas: "main f1" "meta f2"; grid-template-columns: minmax(0, 1fr) auto; row-gap: .15rem; padding-top: .55rem; padding-bottom: .55rem; }
+  /* Mozgások: 1. sor dátum | ikon + mennyiség, 2. sor bizonylat | rögzítette */
+  .tbl.cards.moves-tbl tbody tr { grid-template-areas: "ico main f1" "ico meta f2"; grid-template-columns: 24px minmax(0, 1fr) auto; row-gap: .15rem; padding-top: .55rem; padding-bottom: .55rem; }
+  .tbl.cards.moves-tbl td.c-ico { grid-area: ico; padding-top: 1px; }
   .tbl.cards.moves-tbl td.c-f1, .tbl.cards.moves-tbl td.c-f2 { text-align: right; }
   .tbl.cards.moves-tbl td.c-main { font-weight: 500; }
-  .tbl.cards.moves-tbl td.c-meta { padding-left: 30px; }
 }
 /* Állapotjelölők: jelmagyarázat-csík, esedékes leltár pont */
 .legend-bar { display: inline-block; width: 4px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: .3rem; background: var(--st); }

@@ -1,9 +1,9 @@
 // Áttekintő: készlet táblázat szűrőkkel.
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, fmtMoney, norm, help, matcher, sortArrow, STATUS_TEXT } from '../ui.js';
-import { showItemDetail } from './common.js';
+import { showItemDetail, filterButton, openFilter, inSel, countOptions } from './common.js';
 
-const ui = { q: '', cat: '', wh: '', filter: '', sort: 'polc', dir: 1 };
+const ui = { q: '', f: { cat: new Set(), wh: new Set() }, filter: '', sort: 'polc', dir: 1 };
 
 const FILTERS = {
   '': ['Minden aktív tétel', () => true],
@@ -36,8 +36,7 @@ function rows() {
   const match = matcher(ui.q);
   const f = FILTERS[ui.filter][1];
   return store.activeItems()
-    .filter(t => !ui.cat || t.kategoria === ui.cat)
-    .filter(t => !ui.wh || t.raktar === ui.wh)
+    .filter(t => inSel(ui.f.cat, t.kategoria) && inSel(ui.f.wh, t.raktar))
     .filter(t => match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
     .filter(t => f(t, stock[t.tetel_id]))
     .sort((a, b) => {
@@ -46,11 +45,21 @@ function rows() {
     });
 }
 
+/** Szűrő csoportok (kategória; raktár, ha több van) a darabszámmal. */
+function groups() {
+  const items = store.activeItems();
+  const whs = store.warehouses();
+  return [
+    { key: 'cat', title: 'Kategória', options: countOptions(store.categories(), items, 'kategoria') },
+    { key: 'wh', title: 'Raktár', options: whs.length > 1 ? countOptions(whs, items, 'raktar') : [] },
+  ];
+}
+
 function statsHtml() {
   const items = store.activeItems();
   const st = store.state.stock;
   const c = k => items.filter(t => FILTERS[k][1](t, st[t.tetel_id])).length;
-  const box = (k, v, l, cls) => html`<button class="stat ${cls} ${ui.filter === k ? 'sel' : ''}" data-filter="${k}"><div class="v">${v}</div><div class="l">${l}</div></button>`;
+  const box = (k, v, l, cls) => html`<button class="stat ${cls} ${ui.filter === k ? 'sel' : ''}" data-stat="${k}"><div class="v">${v}</div><div class="l">${l}</div></button>`;
   return html`
     ${box('', items.length, 'Aktív tétel', '')}
     ${box('hiany', c('hiany'), 'Hiány (min. alatt)', 'err')}
@@ -90,22 +99,16 @@ function update(root) {
 
 export default {
   render(root) {
-    if (root.dataset.view === 'attekinto' && root.querySelector('#tbody')) {
-      // Már kirajzolva: csak az adatokat frissítjük (a kereső fókusza megmarad)
-      const sel = root.querySelector('#cat');
-      const cats = store.categories();
-      if (sel.options.length - 1 !== cats.length) sel.innerHTML = String(html`<option value="">Minden kategória</option>${cats.map(c => html`<option ${c === ui.cat ? 'selected' : ''}>${c}</option>`)}`);
-      return update(root);
-    }
+    // Már kirajzolva: csak az adatokat frissítjük (a kereső fókusza megmarad)
+    if (root.dataset.view === 'attekinto' && root.querySelector('#tbody')) return update(root);
     root.dataset.view = 'attekinto';
     root.innerHTML = String(html`
       <div class="page-head"><h1>Készlet áttekintő</h1>${help(html`<b>Jelölések</b><br><span class="legend-bar st-hiany"></span> piros csík: hiány – a készlet a minimum alatt<br><span class="legend-bar st-figyelem"></span> sárga csík: fogyóban – közel a minimumhoz<br><span class="due-dot"></span> esedékes leltár (lejárt a leltári ciklus)<br><br>A felső számlálókra kattintva szűrhetsz; a sorra kattintva megnyílik a tétel adatlapja.`)}</div>
       <div class="stats" id="stats"></div>
       <div class="card">
         <div class="toolbar card-toolbar">
-          <input type="search" id="q" placeholder="Keresés név, polc, kategória szerint…" value="${ui.q}">
-          <select id="cat"><option value="">Minden kategória</option>${store.categories().map(c => html`<option ${c === ui.cat ? 'selected' : ''}>${c}</option>`)}</select>
-          ${store.warehouses().length > 1 ? html`<select id="wh"><option value="">Minden raktár</option>${store.warehouses().map(w => html`<option ${w === ui.wh ? 'selected' : ''}>${w}</option>`)}</select>` : ''}
+          <input type="search" id="q" placeholder="Keresés név, hely, kategória szerint…" value="${ui.q}">
+          ${filterButton(ui.f)}
         </div>
         <div class="tbl-foot" id="count"></div>
         <div class="table-wrap">
@@ -119,11 +122,10 @@ export default {
     update(root);
 
     root.querySelector('#q').addEventListener('input', e => { ui.q = e.target.value; update(root); });
-    root.querySelector('#cat').addEventListener('change', e => { ui.cat = e.target.value; update(root); });
-    root.querySelector('#wh')?.addEventListener('change', e => { ui.wh = e.target.value; update(root); });
     root.onclick = e => {
-      const st = e.target.closest('[data-filter]');
-      if (st) { ui.filter = ui.filter === st.dataset.filter ? '' : st.dataset.filter; return update(root); }
+      if (e.target.closest('[data-filter]')) return openFilter(e.target.closest('[data-filter]'), groups, ui.f, () => update(root));
+      const st = e.target.closest('[data-stat]');
+      if (st) { ui.filter = ui.filter === st.dataset.stat ? '' : st.dataset.stat; return update(root); }
       const th = e.target.closest('th[data-sort]');
       if (th) { if (ui.sort === th.dataset.sort) ui.dir *= -1; else { ui.sort = th.dataset.sort; ui.dir = 1; } return update(root); }
       const tr = e.target.closest('tr[data-id]');

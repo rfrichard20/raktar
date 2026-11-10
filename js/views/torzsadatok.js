@@ -1,13 +1,14 @@
 // Törzsadatok (admin): tételek + beszerzési források, beszállítók, felhasználók.
 import * as store from '../store.js';
 import { html, fmtNum, fmtMoney, fmtDate, matcher, compare, sortArrow, modal, toast, formValues, parseNum, help, sec, confirmDialog, suggestInput } from '../ui.js';
-import { itemSelector, tplIds, listSelect, bindListSelects } from './common.js';
+import { itemSelector, tplIds, listSelect, bindListSelects, filterButton, openFilter, inSel, countOptions } from './common.js';
 import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
 const ui = {
-  tab: 'tetelek', q: '', inactive: false,
-  f: { kat: '', wh: '', sup: '', mod: '', role: '' },
+  tab: 'tetelek', q: '',
+  // Szűrők (filterButton): üres = mind; „egyeb” → 'inaktiv': az inaktívak is látszanak
+  f: { kat: new Set(), wh: new Set(), sup: new Set(), mod: new Set(), role: new Set(), egyeb: new Set() },
   sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1], emailek: ['nev', 1] },
 };
 
@@ -25,8 +26,9 @@ async function runOps(ops) {
 // Szám mező: új rekordnál üres (a javasolt érték csak mintaszöveg), meglévőnél a tényleges érték
 const numVal = (isNew, v) => (isNew ? '' : String(v ?? ''));
 
-/* ---------- Tétel szerkesztő ---------- */
-function editItem(t, ctx) {
+/* ---------- Tétel szerkesztő (a tétel adatlapjáról is nyílik) ---------- */
+/** Tétel szerkesztése / új tétel. Visszaad: Promise, amely az ablak bezárásakor teljesül. */
+export function editItem(t) {
   const isNew = !t;
   t = t || { tetel_id: L.newId('T', 6), megnevezes: '', kategoria: '', mertekegyseg: '', raktar: '', polc: '', min_keszlet: 0, cel_keszlet: 0, leltar_ciklus_nap: 90, aktiv: true, megjegyzes: '' };
   const db = store.state.db;
@@ -100,6 +102,7 @@ function editItem(t, ctx) {
     tbody.appendChild(tmp.firstElementChild);
   };
   tbody.onclick = e => { if (e.target.closest('[data-del]')) e.target.closest('tr').remove(); };
+  return m.done;
 }
 
 /* ---------- Beszállító szerkesztő ---------- */
@@ -264,19 +267,23 @@ function columns(db) {
 function filtered(db) {
   const f = ui.f;
   const match = matcher(ui.q);
+  const inactive = f.egyeb.has('inaktiv');
   if (ui.tab === 'tetelek') {
-    return db.Tetelek.filter(t => (ui.inactive || t.aktiv) && match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
-      .filter(t => !f.kat || t.kategoria === f.kat)
-      .filter(t => !f.wh || t.raktar === f.wh)
-      .filter(t => !f.sup || (f.sup === '-' ? !L.sourcesFor(db, t.tetel_id).length : L.sourcesFor(db, t.tetel_id).some(s => s.beszallito_id === f.sup)));
+    return db.Tetelek.filter(t => (inactive || t.aktiv) && match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
+      .filter(t => inSel(f.kat, t.kategoria) && inSel(f.wh, t.raktar))
+      .filter(t => {
+        if (!f.sup.size) return true;
+        const src = L.sourcesFor(db, t.tetel_id);
+        return src.length ? src.some(s => f.sup.has(s.beszallito_id)) : f.sup.has('-');
+      });
   }
   if (ui.tab === 'beszallitok') {
-    return db.Beszallitok.filter(b => (ui.inactive || b.aktiv) && match(`${b.nev} ${b.kapcsolattarto} ${b.email}`))
-      .filter(b => !f.mod || L.orderMode(b) === f.mod);
+    return db.Beszallitok.filter(b => (inactive || b.aktiv) && match(`${b.nev} ${b.kapcsolattarto} ${b.email}`))
+      .filter(b => inSel(f.mod, L.orderMode(b)));
   }
   if (ui.tab === 'sablonok') return (db.Leltar_sablonok || []).filter(s => match(s.nev));
   if (ui.tab === 'emailek') return (db.Email_sablonok || []).filter(s => match(`${s.nev} ${s.targy}`));
-  return db.Felhasznalok.filter(u => (ui.inactive || u.aktiv) && match(`${u.nev} ${u.email}`)).filter(u => !f.role || u.szerepkor === f.role);
+  return db.Felhasznalok.filter(u => (inactive || u.aktiv) && match(`${u.nev} ${u.email}`)).filter(u => inSel(f.role, u.szerepkor));
 }
 
 
@@ -295,19 +302,21 @@ function tableHtml() {
     <div class="tbl-foot">${list.length} elem</div>`;
 }
 
-function filtersHtml() {
+/** A fülhöz tartozó szűrő csoportok (filterButton / openFilter). */
+function filterGroups() {
   const db = store.state.db;
-  const f = ui.f;
-  const sel = (k, all, opts) => html`<select data-f="${k}"><option value="">${all}</option>${opts.map(([v, l]) => html`<option value="${v}" ${f[k] === v ? 'selected' : ''}>${l}</option>`)}</select>`;
+  const other = { key: 'egyeb', title: 'Egyéb', options: [['inaktiv', 'Inaktívak is']] };
   if (ui.tab === 'tetelek') {
     const whs = store.warehouses();
-    return html`${sel('kat', 'Minden kategória', store.categories().map(c => [c, c]))}
-      ${whs.length > 1 ? sel('wh', 'Minden raktár', whs.map(w => [w, w])) : ''}
-      ${sel('sup', 'Minden beszállító', [['-', '— forrás nélkül —'], ...db.Beszallitok.slice().sort((a, b) => a.nev.localeCompare(b.nev, 'hu')).map(b => [b.beszallito_id, b.nev])])}`;
+    return [
+      { key: 'kat', title: 'Kategória', options: countOptions(store.categories(), db.Tetelek, 'kategoria') },
+      { key: 'wh', title: 'Raktár', options: whs.length > 1 ? countOptions(whs, db.Tetelek, 'raktar') : [] },
+      { key: 'sup', title: 'Beszállító', options: [['-', '— forrás nélkül —'], ...db.Beszallitok.slice().sort((a, b) => a.nev.localeCompare(b.nev, 'hu')).map(b => [b.beszallito_id, b.nev])] },
+      other,
+    ];
   }
-  if (ui.tab === 'sablonok' || ui.tab === 'emailek') return '';
-  if (ui.tab === 'beszallitok') return sel('mod', 'Minden rendelési mód', [['webshop', 'Webshop'], ['email', 'E-mail']]);
-  return sel('role', 'Minden szerepkör', Object.keys(L.ROLES).reverse().map(r => [r, L.ROLE_LABELS[r]]));
+  if (ui.tab === 'beszallitok') return [{ key: 'mod', title: 'Rendelési mód', options: [['webshop', 'Webshop'], ['email', 'E-mail']] }, other];
+  return [{ key: 'role', title: 'Szerepkör', options: Object.keys(L.ROLES).reverse().map(r => [r, L.ROLE_LABELS[r]]) }, other];
 }
 
 /* ---------- Listák: kategóriák, mértékegységek, raktárak ---------- */
@@ -342,11 +351,8 @@ function listsHtml() {
 async function listAction(e, ctx) {
   const db = store.state.db;
   const rerender = () => ctx.rerender();
-  const add = async (tipus, ertek) => {
-    // friss állapotból számol, így egymás utáni felvételnél is növekvő a sorrend
-    const sorrend = (store.state.db.Listak || []).filter(l => l.tipus === tipus).length + 1;
-    await store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus, ertek, sorrend } });
-  };
+  // friss állapotból számol, így egymás utáni felvételnél is növekvő a sorrend
+  const add = (tipus, ertek) => store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus, ertek, sorrend: store.nextListOrder(tipus) } });
   try {
     const allB = e.target.closest('[data-l-addall]');
     if (allB) {
@@ -394,13 +400,6 @@ export default {
     const labels = isAdmin ? allLabels : { sablonok: allLabels.sablonok };
     if (params.tab && labels[params.tab]) { ui.tab = params.tab; delete params.tab; history.replaceState(null, '', '#/torzsadatok'); }
     if (!labels[ui.tab]) ui.tab = Object.keys(labels)[0];
-    if (params.tetel && isAdmin) {
-      const t = store.get('Tetelek', params.tetel);
-      delete params.tetel;
-      history.replaceState(null, '', '#/torzsadatok');
-      ui.tab = 'tetelek';
-      if (t) setTimeout(() => editItem(t, ctx), 0);
-    }
     const newLabel = { tetelek: '+ Új tétel', beszallitok: '+ Új beszállító', felhasznalok: '+ Új felhasználó', sablonok: '+ Új sablon', emailek: '+ Új e-mail sablon' };
     const refresh = () => { root.querySelector('#tbl').innerHTML = String(tableHtml()); };
     const openTpl = tpl => itemSelector({ mode: 'template', tpl });
@@ -420,8 +419,7 @@ export default {
         const v = inp.value.trim();
         if (!v) return;
         try {
-          const sorrend = (store.state.db.Listak || []).filter(l => l.tipus === f.dataset.lForm).length + 1;
-          await store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus: f.dataset.lForm, ertek: v, sorrend } });
+          await store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus: f.dataset.lForm, ertek: v, sorrend: store.nextListOrder(f.dataset.lForm) } });
           ctx.rerender();
           root.querySelector(`[data-l-form="${f.dataset.lForm}"] [name=ertek]`)?.focus();
         } catch (x) { toast(x.message, 'error'); }
@@ -440,25 +438,25 @@ export default {
       <div class="page-head"><h1>Törzsadatok</h1><div class="actions"><button class="btn btn-primary" data-a="new">${newLabel[ui.tab]}</button></div></div>
       ${tabsHtml}
       <div class="toolbar"><input type="search" id="q" placeholder="Keresés…" value="${ui.q}">
-        ${filtersHtml()}
         ${ui.tab === 'sablonok' ? help('A leltársablon egy elmentett tételösszeállítás. A Leltár oldalon az „Egyedi / sablon” kártyáról egy kattintással indítható. Mindenki számára elérhető.')
           : ui.tab === 'emailek' ? help('A megrendelő és ajánlatkérő e-mailek sablonjai. A beszállítónál beállítható, melyik legyen az alapértelmezett (pl. tegező viszony). Küldéskor a sablon kitöltve, szerkeszthetően jelenik meg.')
-          : html`<label class="check small"><input type="checkbox" id="inact" ${ui.inactive ? 'checked' : ''}> Inaktívak is</label>`}</div>
+          : filterButton(ui.f)}</div>
       ${ui.tab === 'felhasznalok' && store.isDemo ? html`<div class="notice notice-info small">Éles használatban a felhasználó a megadott Google-fiókkal tud belépni.</div>` : ''}
       ${ui.tab === 'emailek' && !(store.state.db.Email_sablonok || []).length ? html`<div class="notice notice-info small">Még nincs saját sablon – küldéskor a beépített alapsablonok (hivatalos, tegező, ajánlatkérés) használhatók.
         <button class="btn btn-sm" data-a="seedmail" style="margin-left:.5rem">Alapsablonok felvétele szerkesztéshez</button></div>` : ''}
       <div class="card"><div class="table-wrap" id="tbl">${tableHtml()}</div></div>`);
     root.querySelector('#q').addEventListener('input', e => { ui.q = e.target.value; refresh(); });
-    root.querySelector('#inact')?.addEventListener('change', e => { ui.inactive = e.target.checked; refresh(); });
-    root.querySelectorAll('[data-f]').forEach(s => s.addEventListener('change', () => { ui.f[s.dataset.f] = s.value; refresh(); }));
     root.onclick = e => {
+      const fb = e.target.closest('[data-filter]');
+      if (fb) return openFilter(fb, filterGroups, ui.f, refresh);
       const tab = e.target.closest('[data-tab]');
       if (tab) { ui.tab = tab.dataset.tab; ui.q = ''; return ctx.rerender(); }
       const supf = e.target.closest('[data-supf]');
       if (supf) {
         // Beszállító → a hozzá tartozó tételek (szűrt Tételek fül)
         ui.tab = 'tetelek'; ui.q = '';
-        ui.f = { ...ui.f, kat: '', wh: '', sup: supf.dataset.supf };
+        ui.f.kat.clear(); ui.f.wh.clear();
+        ui.f.sup = new Set([supf.dataset.supf]);
         return ctx.rerender();
       }
       const th = e.target.closest('th[data-sort]');
@@ -475,7 +473,7 @@ export default {
         return;
       }
       if (e.target.closest('[data-a="new"]')) {
-        if (ui.tab === 'tetelek') editItem(null, ctx);
+        if (ui.tab === 'tetelek') editItem(null);
         else if (ui.tab === 'beszallitok') editSupplier(null);
         else if (ui.tab === 'sablonok') openTpl(null);
         else if (ui.tab === 'emailek') editEmailTpl(null);
@@ -484,7 +482,7 @@ export default {
       }
       const tr = e.target.closest('tr[data-id]');
       if (!tr) return;
-      if (ui.tab === 'tetelek') editItem(store.get('Tetelek', tr.dataset.id), ctx);
+      if (ui.tab === 'tetelek') editItem(store.get('Tetelek', tr.dataset.id));
       else if (ui.tab === 'beszallitok') editSupplier(store.get('Beszallitok', tr.dataset.id));
       else if (ui.tab === 'sablonok') openTpl(store.get('Leltar_sablonok', tr.dataset.id));
       else if (ui.tab === 'emailek') editEmailTpl(store.get('Email_sablonok', tr.dataset.id));

@@ -9,6 +9,7 @@ import kivet from './views/kivet.js';
 import rendelesek from './views/rendelesek.js';
 import torzsadatok from './views/torzsadatok.js';
 import kimutatasok from './views/kimutatasok.js';
+import mozgasok from './views/mozgasok.js';
 import fiok from './views/fiok.js';
 import login from './views/login.js';
 import { attachPicker, showItemDetail } from './views/common.js';
@@ -24,6 +25,7 @@ const ROUTES = {
   rendelesek: { view: rendelesek, label: 'Rendelés', icon: 'cart', role: 'rendeles',
     badge: () => ({ n: Object.values(store.state.stock).filter(x => x.javaslat > 0).length, text: 'pótolandó tétel' }) },
   kimutatasok: { view: kimutatasok, label: 'Kimutatás', icon: 'chart', role: 'kimutatas' },
+  mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'olvaso' },
   // Raktáros is eléri, de nála csak a Leltársablonok fül látszik
   torzsadatok: { view: torzsadatok, label: 'Törzsadatok', icon: 'database', role: 'raktaros' },
   fiok: { view: fiok, label: 'Fiók', icon: 'user', role: 'olvaso', bottom: true },

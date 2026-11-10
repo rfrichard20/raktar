@@ -2,7 +2,7 @@
 // → kivét űrlap (tételek) → lezárás. A félbehagyott kivét a készüléken marad (vázlat), offline is folytatható.
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, parseNum, confirmDialog, toast, help, modal, matcher, compare, sortArrow, formValues } from '../ui.js';
-import { attachPicker, kivetFields, saveKivet, moveIcon } from './common.js';
+import { attachPicker, kivetFields, saveKivet, moveIcon, enterBackHtml, bindEnterBack } from './common.js';
 import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
@@ -159,7 +159,7 @@ function renderForm(root, ctx) {
       </dl>
     </div>
     <div class="card">
-      <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div></div>
+      <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div>${enterBackHtml()}</div>
       ${slot.draft.items.length ? html`<div class="table-wrap"><table class="tbl cards nochk fixed">
         <colgroup><col><col style="width:18%"><col style="width:22%"><col style="width:56px"></colgroup>
         <thead><tr><th>Tétel</th><th class="num">Készlet</th><th>Kivett mennyiség</th><th></th></tr></thead>
@@ -170,6 +170,7 @@ function renderForm(root, ctx) {
         <button class="btn btn-sm btn-primary" data-a="save" ${slot.draft.items.length ? '' : 'disabled'}>Kivét lezárása</button></div>
     </div>`);
 
+  bindEnterBack(root.querySelector('#add'));
   attachPicker(root.querySelector('#add'), {
     items: store.activeItems,
     exclude: () => new Set(slot.draft.items.map(x => x.tetel_id)),

@@ -12,6 +12,7 @@ export const state = {
   token: null,
   snapshot: null,      // utolsó szerver adat
   snapshotAt: null,
+  version: null,       // a szerver adatverziója a pillanatképnél (változatlan adatot nem tölt le újra)
   outbox: [],          // feltöltésre váró műveletek
   rejected: [],        // a szerver által elutasított műveletek (hibaüzenettel)
   syncing: false,
@@ -63,7 +64,7 @@ export async function init() {
     idb.get('session'), idb.get('snapshot'), idb.get('outbox'), idb.get('rejected'),
   ]);
   if (session) { state.user = session.user; state.token = session.token; }
-  if (snap) { state.snapshot = snap.data; state.snapshotAt = snap.at; }
+  if (snap) { state.snapshot = snap.data; state.snapshotAt = snap.at; state.version = snap.version || null; }
   state.outbox = outbox || [];
   state.rejected = rejected || [];
   recompute();
@@ -78,7 +79,7 @@ export async function setSession(token, user) {
   // Másik felhasználó: a régi gyorsítótárat eldobjuk. A kimenő sor marad, de mindenki csak a saját
   // rögzítéseit tölti fel (op.by), így más nevében rögzített adat nem kerül fel az ő nevében.
   if (state.user && state.user.email !== user.email) {
-    state.snapshot = null;
+    state.snapshot = null; state.version = null;
     await idb.del('snapshot');
   }
   state.token = token;
@@ -91,7 +92,7 @@ export async function setSession(token, user) {
 }
 
 export async function logout() {
-  state.user = null; state.token = null; state.snapshot = null;
+  state.user = null; state.token = null; state.snapshot = null; state.version = null;
   await Promise.all([idb.del('session'), idb.del('snapshot')]);
   recompute();
   emit();
@@ -109,14 +110,32 @@ export async function enqueue(op) {
   await persist();
   recompute();
   emit();
-  sync();
+  syncSoon();
   return op;
+}
+
+// Kötegelés: a gyorsan egymás után rögzített műveletek (pl. tétel + forrásai) rövid várakozás után
+// egy kérésben mennek fel, nem külön-külön.
+const BATCH_DELAY = 800;
+let batchTimer = null;
+function syncSoon() {
+  clearTimeout(batchTimer);
+  batchTimer = setTimeout(sync, BATCH_DELAY);
+}
+
+// Hiba után (pl. időtúllépés, szerverhiba) magától újrapróbál, egyre ritkábban: 15 mp, 30 mp … legfeljebb 3 perc.
+let retryTimer = null, retryDelay = 15000;
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(sync, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 180000);
 }
 
 let syncPromise = null;
 let syncAgain = false;
 export function sync() {
   if (!state.token) return Promise.resolve();
+  clearTimeout(batchTimer);
   if (syncPromise) { syncAgain = true; return syncPromise; } // futás közben érkezett új művelet → utána újra
   syncPromise = doSync().finally(() => {
     syncPromise = null;
@@ -129,13 +148,21 @@ export function sync() {
 }
 
 async function doSync() {
+  clearTimeout(retryTimer);
   state.syncing = true;
   emit('status');
   const mine = myOutbox();
   const sent = mine.slice(0, SYNC_BATCH);
   if (mine.length > sent.length) syncAgain = true; // a többi a következő körben
   try {
-    const res = sent.length ? await backend.sync(state.token, sent) : await backend.fetchAll(state.token);
+    // Feltöltendő nélkül: csak akkor jön le az adat, ha a szerveren változott (verzió)
+    const res = sent.length ? await backend.sync(state.token, sent) : await backend.fetchAll(state.token, state.snapshot ? state.version : null);
+    if (res.unchanged) {
+      state.snapshotAt = new Date().toISOString();
+      state.online = true; state.lastError = null; retryDelay = 15000;
+      if (res.user) state.user = res.user;
+      return;
+    }
     if (sent.length) {
       const byId = new Map((res.results || []).map(r => [r.op_id, r]));
       const failed = [];
@@ -149,20 +176,23 @@ async function doSync() {
     }
     state.snapshot = res.data;
     state.snapshotAt = new Date().toISOString();
+    state.version = res.version || null;
     if (res.user) {
       state.user = res.user;
       await idb.set('session', { token: state.token, user: res.user });
     }
     state.online = true;
     state.lastError = null;
-    await Promise.all([idb.set('snapshot', { data: state.snapshot, at: state.snapshotAt }), persist()]);
+    retryDelay = 15000;
+    await Promise.all([idb.set('snapshot', { data: state.snapshot, at: state.snapshotAt, version: state.version }), persist()]);
   } catch (e) {
+    if (!e.auth) scheduleRetry();
     if (e.network) { state.online = false; state.lastError = e.message; }
     else if (e.auth) {
       // Lejárt / visszavont hozzáférés: a letöltött adatot azonnal töröljük a készülékről,
       // és újra be kell jelentkezni. A még fel nem töltött rögzítések (outbox) megmaradnak.
       state.authError = e.message; state.lastError = e.message;
-      state.user = null; state.token = null; state.snapshot = null; state.snapshotAt = null;
+      state.user = null; state.token = null; state.snapshot = null; state.snapshotAt = null; state.version = null;
       await Promise.all([idb.del('session'), idb.del('snapshot')]);
     }
     else { state.lastError = e.message; }
@@ -264,5 +294,7 @@ export const placeLabel = t => [t.raktar, t.polc].filter(Boolean).join(' · ') |
 /** Tételek bejárási sorrendje: raktár, polc, név (a hely nélküliek a végén) – leltár, tételválasztó. */
 export const byPlace = (a, b) => (a.raktar || '~').localeCompare(b.raktar || '~', 'hu') ||
   (a.polc || '~').localeCompare(b.polc || '~', 'hu') || a.megnevezes.localeCompare(b.megnevezes, 'hu');
+/** Új választólista-elem sorszáma: a típus legnagyobb sorszáma + 1 (törlés után sem ütközik). */
+export const nextListOrder = tipus => Math.max(0, ...(state.db.Listak || []).filter(l => l.tipus === tipus).map(l => Number(l.sorrend) || 0)) + 1;
 export const categories = () => [...new Set(state.db.Tetelek.map(t => t.kategoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
 export { isDemo, backend, L };

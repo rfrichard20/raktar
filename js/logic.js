@@ -14,7 +14,7 @@ var RaktarLogic = (function () {
   var LIST_TYPES = { kategoria: 'Kategóriák', mertekegyseg: 'Mértékegységek', raktar: 'Raktárak' };
   var LIST_FIELD = { kategoria: 'kategoria', mertekegyseg: 'mertekegyseg', raktar: 'raktar' };
 
-  // Az oszlopok sorrendje a Sheetben is ez (a Keszlet lap képletei erre épülnek).
+  // Új lapnál ez az oszlopsorrend; a szerver a fejlécnevek alapján olvas és ír, így az oszlopok átrendezhetők.
   var SCHEMA = {
     Tetelek: { key: 'tetel_id', cols: [
       ['tetel_id', 'str'], ['megnevezes', 'str'], ['kategoria', 'str'], ['mertekegyseg', 'str'],
@@ -473,11 +473,7 @@ var RaktarLogic = (function () {
       res[t.tetel_id] = { tetel_id: t.tetel_id, keszlet: 0, leltarDatum: '', leltarErtek: null, elteres: null,
         uton: 0, mozgasDb: 0, utolsoMozgas: '' };
     });
-    var moves = (db.Mozgasok || []).slice().sort(function (a, b) {
-      if (a.datum !== b.datum) return a.datum < b.datum ? -1 : 1;
-      return a.rogzitve < b.rogzitve ? -1 : a.rogzitve > b.rogzitve ? 1 : 0;
-    });
-    moves.forEach(function (m) {
+    sortedMoves(db).forEach(function (m) {
       var s = res[m.tetel_id];
       if (!s) return;
       var q = toNum(m.mennyiseg);
@@ -496,6 +492,9 @@ var RaktarLogic = (function () {
       res[l.tetel_id].uton = round3(res[l.tetel_id].uton + Math.max(0, toNum(l.mennyiseg) - toNum(l.beerkezett)));
     });
     var DAY = 86400000;
+    // Források tételenként egy menetben (tételenkénti szűrés helyett – sok tételnél ez a lassú rész)
+    var srcBy = {};
+    (db.Forrasok || []).forEach(function (f) { (srcBy[f.tetel_id] = srcBy[f.tetel_id] || []).push(f); });
     (db.Tetelek || []).forEach(function (t) {
       var s = res[t.tetel_id];
       var min = toNum(t.min_keszlet), cel = toNum(t.cel_keszlet), ciklus = toNum(t.leltar_ciklus_nap);
@@ -504,7 +503,7 @@ var RaktarLogic = (function () {
       if (min > 0 && s.keszlet <= min) s.statusz = 'hiany';
       else if (min > 0 && s.keszlet <= min + Math.max(1, (cel - min) * 0.25)) s.statusz = 'figyelem';
       else s.statusz = 'ok';
-      var src = sourcesFor(db, t.tetel_id);
+      var src = (srcBy[t.tetel_id] || []).slice().sort(function (a, b) { return (b.elsodleges ? 1 : 0) - (a.elsodleges ? 1 : 0); });
       s.forras = src[0] || null;
       s.forrasDb = src.length;
       // Készletérték: aktuális készlet × elsődleges forrás egységára (ha van)

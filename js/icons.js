@@ -23,6 +23,10 @@ export const ICONS = {
   hand: svg('<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-1.5v-2a1.5 1.5 0 0 1 3 0V12m0-1.5a1.5 1.5 0 0 1 3 0V16a5 5 0 0 1-5 5h-1.5a5 5 0 0 1-4.3-2.4L4.5 14a1.5 1.5 0 0 1 2.6-1.5L8 14"/>'),
   edit: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
   out: svg('<path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M12 15V3m-4 4 4-4 4 4"/>'),
+  in: svg('<path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M12 3v12m-4-4 4 4 4-4"/>'),
+  adjust: svg('<path d="M12 4v8M8 8h8M8 19h8"/>'), // ± – korrekció
+  moves: svg('<path d="M7 20V4M3.5 7.5 7 4l3.5 3.5M17 4v16m-3.5-3.5L17 20l3.5-3.5"/>'), // mozgások (be / ki)
+  filter: svg('<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>'),
   more: svg('<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>'),
   up: svg('<path d="m6 15 6-6 6 6"/>'),
   down: svg('<path d="m6 9 6 6 6-6"/>'),

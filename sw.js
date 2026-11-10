@@ -1,13 +1,13 @@
 // Service worker: az alkalmazás fájljait gyorsítótárazza, így internet nélkül is elindul.
 // Stratégia: hálózat elsőként (rövid időkorláttal), hiba esetén a gyorsítótárból.
 // Új verzió kiadásakor elég a VERSION értékét növelni.
-const VERSION = 'raktar-v41';
+const VERSION = 'raktar-v43';
 const FONTS = ['400', '500', '600', '700'].flatMap(w => ['latin', 'latin-ext'].map(s => `fonts/poppins-${w}-${s}.woff2`));
 const ASSETS = [
   ...FONTS, './', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'css/app.css',
   'js/theme.js', 'js/logic.js', 'js/config.js', 'js/idb.js', 'js/ui.js', 'js/icons.js', 'js/backend.js', 'js/store.js', 'js/app.js',
   'js/views/common.js', 'js/views/login.js', 'js/views/fiok.js', 'js/views/attekinto.js', 'js/views/leltar.js',
-  'js/views/beerkezes.js', 'js/views/kivet.js', 'js/views/rendelesek.js', 'js/views/torzsadatok.js', 'js/views/kimutatasok.js',
+  'js/views/beerkezes.js', 'js/views/kivet.js', 'js/views/rendelesek.js', 'js/views/torzsadatok.js', 'js/views/kimutatasok.js', 'js/views/mozgasok.js',
 ];
 
 self.addEventListener('install', e => {

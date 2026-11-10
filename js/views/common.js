@@ -1,7 +1,7 @@
 // Több nézetben használt elemek.
 import * as store from '../store.js';
 import { ICONS } from '../icons.js';
-import { html, raw, esc, matcher, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, copyText, help, STATUS_TEXT, fmtMoney, todayInput, dateInputToIso, dateStamp, suggestInput } from '../ui.js';
+import { html, raw, esc, matcher, fmtNum, fmtDate, modal, toast, parseNum, formValues, sec, confirmDialog, copyText, help, STATUS_TEXT, fmtMoney, todayInput, dateInputToIso, dateStamp, suggestInput, popover } from '../ui.js';
 
 const L = window.RaktarLogic;
 
@@ -19,7 +19,7 @@ export function attachPicker(input, opts) {
     const ex = opts.exclude ? opts.exclude() : new Set();
     const match = matcher(q);
     matches = opts.items().filter(t => !ex.has(t.tetel_id) &&
-      match(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.tetel_id} ${L.sourcesFor(store.state.db, t.tetel_id).map(f => f.cikkszam).join(' ')}`))
+      match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id} ${L.sourcesFor(store.state.db, t.tetel_id).map(f => f.cikkszam).join(' ')}`))
       .slice(0, 30);
     close();
     if (!q && !opts.showAll) return;
@@ -54,6 +54,72 @@ export function attachPicker(input, opts) {
     else if (e.key === 'ArrowUp') { hl = Math.max(hl - 1, 0); show(); e.preventDefault(); }
     else if (e.key === 'Enter') { pick(matches[hl]); e.preventDefault(); }
     else if (e.key === 'Escape') close();
+  });
+}
+
+/* ---------- Szűrő gomb (checkboxos legördülő a kereső mellett) ---------- */
+/**
+ * Listák szűrője: egy ikon gomb a kereső mellett (egy sorban), mögötte csoportonként checkboxos lista.
+ * sel: { csoportkulcs: Set } – a kijelölt értékek; üres Set = nincs szűrés (mind látszik).
+ * Használat: toolbarban `${filterButton(ui.f)}`, majd
+ *   root.querySelector('[data-filter]').onclick = e => openFilter(e.currentTarget, groups, ui.f, frissítés);
+ * groups(): [{ key, title, options: [[érték, felirat, darab?]] }] – az üres csoport nem jelenik meg.
+ * A frissítés csak a listát rajzolja újra (a gomb a helyén marad, a darabszámot az openFilter frissíti).
+ */
+const filterCount = sel => Object.values(sel).reduce((a, s) => a + s.size, 0);
+export function filterButton(sel) {
+  const n = filterCount(sel);
+  return html`<button type="button" class="btn filter-btn ${n ? 'on' : ''}" data-filter title="Szűrők" aria-label="Szűrők">${ICONS.filter}${n ? html`<span class="filter-n">${n}</span>` : ''}</button>`;
+}
+export function openFilter(btn, groups, sel, onChange) {
+  const body = () => html`${groups().filter(g => g.options.length).map(g => html`<div class="pop-title">${g.title}</div>
+    ${g.options.map(([v, l, n]) => html`<label class="pop-item"><input type="checkbox" data-g="${g.key}" value="${v}" ${sel[g.key].has(v) ? 'checked' : ''}>
+      <span class="grow">${l}</span>${n != null ? html`<span class="small muted">${n}</span>` : ''}</label>`)}`)}
+    <div class="pop-foot"><button type="button" class="btn btn-sm btn-link-danger" data-x="clear">Szűrők törlése</button>
+      <button type="button" class="btn btn-sm btn-primary" data-x="ok">Kész</button></div>`;
+  const changed = () => {
+    const n = filterCount(sel);
+    btn.classList.toggle('on', !!n);
+    btn.querySelector('.filter-n')?.remove();
+    if (n) btn.insertAdjacentHTML('beforeend', `<span class="filter-n">${n}</span>`);
+    onChange();
+  };
+  popover(btn, body(), {
+    minWidth: 260,
+    onMount: (el, close) => {
+      el.addEventListener('change', e => {
+        const s = sel[e.target.dataset.g];
+        if (!s) return;
+        e.target.checked ? s.add(e.target.value) : s.delete(e.target.value);
+        changed();
+      });
+      el.addEventListener('click', e => {
+        const x = e.target.closest('[data-x]');
+        if (!x) return;
+        if (x.dataset.x === 'clear') { Object.values(sel).forEach(s => s.clear()); el.innerHTML = String(body()); changed(); } else close();
+      });
+    },
+  });
+}
+/** Szűrő teljesül-e: üres Set = mind; egyébként az érték benne van. */
+export const inSel = (set, v) => !set.size || set.has(v);
+/** Felsorolás [érték, felirat, darab] alakban egy lista adott mezőjének értékeiből (darab: hány elem esik bele). */
+export const countOptions = (values, list, field) => values.map(v => [v, v, list.filter(x => x[field] === v).length]);
+
+/**
+ * Tételfelvevő űrlapokon (kivét, rendelés nélküli beérkezés): a mennyiség beírása után Enterre a kurzor
+ * visszaugrik a tételkeresőbe, így a következő tétel rögtön kereshető. Kapcsolható, a készüléken megmarad.
+ * enterBackHtml() a kapcsoló, bindEnterBack(keresőmező) a működés (a kereső kártyáján belüli mennyiségmezőkre).
+ */
+export const enterBackHtml = () => html`<label class="check small nowrap" title="A mennyiség után Enterre a kurzor visszaugrik a tételkeresőbe">
+  <input type="checkbox" data-enterback ${store.getPref('enterBack', true) ? 'checked' : ''}> Enter után vissza a keresőbe</label>`;
+export function bindEnterBack(search) {
+  const card = search.closest('.card');
+  card.querySelector('[data-enterback]')?.addEventListener('change', e => store.setPref('enterBack', e.target.checked));
+  card.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.target.dataset.k !== 'q') return;
+    e.preventDefault();
+    if (store.getPref('enterBack', true)) search.focus(); else e.target.blur();
   });
 }
 
@@ -145,8 +211,7 @@ export function bindListSelects(root) {
           if (!val) { toast('Adj meg egy értéket.', 'warn'); return false; }
           const exists = L.listValues(store.state.db, tipus).find(x => x.toLowerCase() === val.toLowerCase());
           if (exists) return exists; // már van ilyen: azt választjuk
-          const sorrend = (store.state.db.Listak || []).filter(l => l.tipus === tipus).length + 1;
-          try { await store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus, ertek: val, sorrend } }); }
+          try { await store.enqueue({ type: 'mentes', table: 'Listak', row: { lista_id: L.newId('L', 6), tipus, ertek: val, sorrend: store.nextListOrder(tipus) } }); }
           catch (x) { toast(x.message, 'error'); return false; }
           return val;
         },
@@ -176,10 +241,16 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
   const items = store.activeItems().slice().sort(store.byPlace);
   const sel = new Set(tpl ? tplIds(tpl) : []);
   // Meglévő sablon szerkesztésekor alapból csak a benne lévő tételek látszanak
-  const f = { q: '', cat: '', only: !!(tpl && sel.size) };
+  const f = { q: '', only: !!(tpl && sel.size) };
+  const fs = { cat: new Set(), wh: new Set() }; // szűrő (filterButton)
+  const whs = store.warehouses();
+  const groups = () => [
+    { key: 'cat', title: 'Kategória', options: countOptions(store.categories(), items, 'kategoria') },
+    { key: 'wh', title: 'Raktár', options: whs.length > 1 ? countOptions(whs, items, 'raktar') : [] },
+  ];
   const visible = () => {
     const match = matcher(f.q);
-    return items.filter(t => (!f.cat || t.kategoria === f.cat) && (!f.only || sel.has(t.tetel_id)) &&
+    return items.filter(t => inSel(fs.cat, t.kategoria) && inSel(fs.wh, t.raktar) && (!f.only || sel.has(t.tetel_id)) &&
       match(`${t.megnevezes} ${t.kategoria} ${t.polc} ${t.raktar || ''}`));
   };
   const listHtml = () => {
@@ -220,8 +291,8 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
       <section class="fsec"><div class="fsec-title">Tételek</div>
         <div class="toolbar">
           <input type="search" data-f="q" placeholder="Keresés…">
-          <select data-f="cat"><option value="">Minden kategória</option>${store.categories().map(c => html`<option>${c}</option>`)}</select>
-          <label class="check small"><input type="checkbox" data-f="only" ${f.only ? 'checked' : ''}> Csak a kijelöltek</label>
+          ${filterButton(fs)}
+          <label class="check small nowrap"><input type="checkbox" data-f="only" ${f.only ? 'checked' : ''}> Csak a kijelöltek</label>
         </div>
         <div class="toolbar" style="justify-content:space-between">
           <span><b data-count>${sel.size}</b> tétel kijelölve</span>
@@ -233,7 +304,6 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
   const el = m.el;
   const refresh = () => { el.querySelector('[data-list]').innerHTML = String(listHtml()); el.querySelector('[data-count]').textContent = sel.size; };
   el.querySelector('[data-f="q"]').addEventListener('input', e => { f.q = e.target.value; refresh(); });
-  el.querySelector('[data-f="cat"]').addEventListener('change', e => { f.cat = e.target.value; refresh(); });
   el.querySelector('[data-f="only"]').addEventListener('change', e => { f.only = e.target.checked; refresh(); });
   el.querySelector('[data-list]').addEventListener('change', e => {
     const id = e.target.dataset.id;
@@ -242,6 +312,8 @@ export function itemSelector({ mode = 'start', tpl = null, onStart, onDone } = {
     el.querySelector('[data-count]').textContent = sel.size;
   });
   el.addEventListener('click', e => {
+    const fb = e.target.closest('[data-filter]');
+    if (fb) return openFilter(fb, groups, fs, refresh);
     const x = e.target.closest('[data-x]');
     if (!x) return;
     if (x.dataset.x === 'all') visible().forEach(t => sel.add(t.tetel_id));
@@ -319,11 +391,37 @@ const MOVE_SVG = {
 export function moveIcon(tipus) {
   return raw(`<span class="mv-ico mv-${esc(tipus)}" title="${esc(L.MOVE_TYPES[tipus] || tipus)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${MOVE_SVG[tipus] || ''}</svg></span>`);
 }
-/** Mennyiség a mozgás ikonja mellé: az irányt az ikon mutatja, előjel csak a korrekciónál kell (az lehet + és − is). */
+/** Mozgás mennyisége előjellel: + beérkezés, − kivét, korrekciónál a saját előjele; leltárnál a megszámolt érték (előjel nélkül). */
 export function moveQty(m) {
   const n = fmtNum(Math.abs(m.mennyiseg));
-  if (m.tipus === 'KORREKCIO') return (m.mennyiseg < 0 ? '− ' : '+ ') + n;
-  return n;
+  if (m.tipus === 'LELTAR') return n;
+  return (m.tipus === 'KIVET' || m.mennyiseg < 0 ? '− ' : '+ ') + n;
+}
+
+/** A mozgások jelmagyarázata (súgóba). */
+export const movesLegend = () => html`<b>Jelölések</b><br>${Object.keys(L.MOVE_TYPES).map(k => html`<span class="legend-row">${moveIcon(k)} ${L.MOVE_TYPES[k]}</span>`)}
+  <br>A mennyiség a változás előjellel (+ be, − ki); leltárnál a megszámolt mennyiség.`;
+
+/**
+ * Mozgások táblázata (tétel adatlap, Mozgások oldal): elöl a típus ikonja, a végén az előjeles mennyiség
+ * jobbra igazítva, így az ikonok és a számok is oszlopba rendeződnek.
+ * withItem: a tétel neve is látszik (több tétel mozgásai), a sor kattintható → a tétel adatlapja.
+ */
+export function movesTable(moves, { withItem = false } = {}) {
+  const extra = m => html`${m.atvevo || m.munka ? html`<div class="small">${[m.atvevo && `Átvevő: ${store.userName(m.atvevo)}`, m.munka && `Munka: ${m.munka}`].filter(Boolean).join(' · ')}</div>` : ''}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}`;
+  return html`<table class="tbl cards nochk moves-tbl">
+    <thead><tr><th class="c-ico"><span class="sr-only">Típus</span></th><th>Dátum</th>${withItem ? html`<th>Tétel</th>` : ''}<th>Bizonylat</th><th>Rögzítette</th><th class="num">Mennyiség</th></tr></thead>
+    <tbody>${moves.map(m => {
+      const t = store.itemOrStub(m.tetel_id);
+      return html`<tr ${withItem ? html`class="click" data-id="${m.tetel_id}" tabindex="0"` : ''}>
+        <td class="c-ico">${moveIcon(m.tipus)}</td>
+        <td class="${withItem ? 'm-hide' : 'c-main'} nowrap">${fmtDate(m.datum, true)}</td>
+        ${withItem ? html`<td class="c-main">${t.megnevezes}<div class="sub">${store.placeLabel(t)}</div></td>` : ''}
+        <td class="c-meta">${withItem ? html`<span class="m-only">${fmtDate(m.datum, true)} · </span>` : ''}${m.bizonylat}${extra(m)}</td>
+        <td class="c-f2">${store.userName(m.felhasznalo)}</td>
+        <td class="num c-f1"><span class="move-q mv-${m.tipus}">${moveQty(m)}</span> <span class="small muted">${t.mertekegyseg}</span></td>
+      </tr>`;
+    })}</tbody></table>`;
 }
 
 /* ---------- Anyagkivét (Kivét oldal és gyors kivét az adatlapról) ---------- */
@@ -376,7 +474,7 @@ export async function saveKivet(items, meta) {
 /** Gyors kivét egy tételből (a tétel adatlapjáról). */
 function showKivet(t) {
   const st = store.state.stock[t.tetel_id];
-  modal({
+  return modal({
     title: 'Kivét – ' + t.megnevezes,
     body: html`
       <p class="small muted">Nyilvántartott készlet: <b>${fmtNum(st.keszlet)} ${t.mertekegyseg}</b> · ${store.placeLabel(t)}</p>
@@ -428,9 +526,10 @@ export function showItemDetail(tetelId) {
       </dl>
     </div>
     ${canKivet ? html`<div class="detail-actions">
-      <button class="btn btn-sm" data-d="kivet">${ICONS.out} Kivét…</button>
-      ${canKorr ? html`<button class="btn btn-sm" data-d="korr">Korrekció…</button>` : ''}
-      ${canEdit ? html`<button class="btn btn-sm" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
+      <button class="btn" data-d="kivet">${ICONS.out} Kivét…</button>
+      ${canKorr ? html`<button class="btn" data-d="bevet">${ICONS.in} Bevét…</button>
+        <button class="btn" data-d="korr">${ICONS.adjust} Korrekció…</button>` : ''}
+      ${canEdit ? html`<button class="btn" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
     </div>` : ''}
     ${store.can('rendeles') ? html`<h3 class="sec-h">Beszerzési források</h3>
     ${src.length ? html`<div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
@@ -444,26 +543,67 @@ export function showItemDetail(tetelId) {
         <td class="c-main">${l.rendeles_id}${o.belso_azon ? html` <span class="muted">· ${o.belso_azon}</span>` : ''}<div class="sub">${fmtDate(o.datum)}</div></td>
         <td class="c-act">${store.supplierName(o.beszallito_id)}</td>
         <td class="num c-f1" data-l="Rendelt">${fmtNum(l.mennyiseg)} ${me}</td><td class="num c-f2" data-l="Megérkezett">${fmtNum(l.beerkezett)}</td></tr>`; })}</tbody></table></div>` : ''}
-    <h3 class="sec-h">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40)</span>
-      ${help(html`<b>Jelölések</b><br>${Object.keys(L.MOVE_TYPES).map(k => html`<span class="legend-row">${moveIcon(k)} ${L.MOVE_TYPES[k]}</span>`)}
-        <br>Leltárnál a megszámolt mennyiség, egyébként a mozgás mennyisége látszik; az irányt az ikon jelzi (korrekciónál előjel is).`)}</h3>
-    ${moves.length ? html`<div class="table-wrap"><table class="tbl cards nochk moves-tbl">
-      <thead><tr><th>Mennyiség</th><th>Bizonylat</th><th>Rögzítette</th><th class="num">Dátum</th></tr></thead>
-      <tbody>${moves.map(m => html`<tr>
-        <td class="c-main"><span class="move-date">${moveIcon(m.tipus)} <span class="move-q mv-${m.tipus}">${moveQty(m)}</span> <span class="small muted">${me}</span></span></td>
-        <td class="c-meta">${m.bizonylat}${m.atvevo || m.munka ? html`<div class="small">${[m.atvevo && `Átvevő: ${store.userName(m.atvevo)}`, m.munka && `Munka: ${m.munka}`].filter(Boolean).join(' · ')}</div>` : ''}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}</td>
-        <td class="c-f2">${store.userName(m.felhasznalo)}</td>
-        <td class="num c-f1">${fmtDate(m.datum, true)}</td>
-      </tr>`)}</tbody></table></div>`
-      : html`<p class="muted small">Még nincs mozgás.</p>`}`;
+    <h3 class="sec-h">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40 – az összes a Mozgások oldalon)</span>
+      ${help(movesLegend())}</h3>
+    ${moves.length ? html`<div class="table-wrap">${movesTable(moves)}</div>` : html`<p class="muted small">Még nincs mozgás.</p>`}`;
   const dlg = modal({ title: t.megnevezes, body, actions: [{ label: 'Bezárás', value: null }], wide: true });
-  dlg.el.addEventListener('click', e => {
+  // A művelet ablaka az adatlap fölött nyílik; bezárása után az adatlap frissült adatokkal újranyílik (nyitva marad)
+  dlg.el.addEventListener('click', async e => {
     const b = e.target.closest('[data-d]');
     if (!b) return;
+    const action = { korr: showCorrection, kivet: showKivet, bevet: showBevet,
+      edit: async x => (await import('./torzsadatok.js')).editItem(x) }[b.dataset.d];
+    if (!action) return;
+    const r = action(t); // modális ablak ({ done }) vagy Promise
+    await (r && r.done ? r.done : r);
     dlg.close();
-    if (b.dataset.d === 'korr') showCorrection(t);
-    if (b.dataset.d === 'kivet') showKivet(t);
-    if (b.dataset.d === 'edit') location.hash = '#/torzsadatok?tetel=' + encodeURIComponent(t.tetel_id);
+    showItemDetail(t.tetel_id);
+  });
+}
+
+/**
+ * Bevét egy tételből (az adatlapról). Ha a tételnek van nyitott rendelése, alapból ahhoz kötve rögzül
+ * (a rendelés teljesül), de „rendelés nélkül” is választható.
+ */
+function showBevet(t) {
+  const db = store.state.db;
+  const me = t.mertekegyseg;
+  const lines = db.Rendeles_tetelek.filter(l => l.tetel_id === t.tetel_id && !l.lezarva).map(l => {
+    const o = store.get('Rendelesek', l.rendeles_id) || {};
+    return { l, o, rem: L.round3(l.mennyiseg - l.beerkezett) };
+  }).filter(x => x.o.rendeles_id).sort((a, b) => (a.o.datum < b.o.datum ? -1 : 1)); // a legrégebbi elöl
+  return modal({
+    title: 'Bevét – ' + t.megnevezes,
+    body: html`
+      <p class="small muted">Nyilvántartott készlet: <b>${fmtNum(store.state.stock[t.tetel_id].keszlet)} ${me}</b> · ${store.placeLabel(t)}</p>
+      <div class="form-grid">
+        ${lines.length ? html`<label class="field span-2"><span>Rendelés</span><select name="sor">
+          ${lines.map(x => html`<option value="${x.l.sor_id}">${x.o.rendeles_id} · ${store.supplierName(x.o.beszallito_id)} · ${fmtDate(x.o.datum)} – hátra ${fmtNum(x.rem)} ${me}</option>`)}
+          <option value="">Rendelés nélkül</option></select></label>` : ''}
+        <label class="field"><span>Mennyiség (${me}) *</span><input name="q" inputmode="decimal" placeholder="${lines.length ? fmtNum(lines[0].rem) : me}"></label>
+        <label class="field"><span>Dátum</span><input type="date" name="datum" value="${todayInput()}" max="${todayInput()}"></label>
+        <label class="field"><span>Szállítólevél / számla</span><input name="szallitolevel" placeholder="opcionális"></label>
+        <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" placeholder="opcionális"></label>
+      </div>`,
+    onMount: el => el.querySelector('[name=sor]')?.addEventListener('change', e => {
+      const x = lines.find(y => y.l.sor_id === e.target.value);
+      el.querySelector('[name=q]').placeholder = x ? fmtNum(x.rem) : me;
+    }),
+    actions: [{ label: 'Mégse', value: null }, {
+      label: 'Bevét rögzítése', kind: 'primary', onClick: async el => {
+        const v = formValues(el);
+        const q = parseNum(v.q);
+        if (!(q > 0)) { toast('Adj meg egy pozitív mennyiséget.', 'error'); return false; }
+        if (v.datum > todayInput()) { toast('A dátum nem lehet a jövőben.', 'error'); return false; }
+        const x = lines.find(y => y.l.sor_id === v.sor);
+        try {
+          await store.enqueue({ type: 'mozgasok', rows: [{ mozgas_id: L.newId('M', 12), datum: dateInputToIso(v.datum || todayInput()),
+            tipus: 'BEERKEZES', tetel_id: t.tetel_id, mennyiseg: q, bizonylat: v.szallitolevel.trim() || (x ? x.o.rendeles_id : 'Rendelés nélkül'),
+            rendeles_sor_id: x ? x.l.sor_id : '', megjegyzes: v.megjegyzes.trim() }] });
+          toast('Bevét rögzítve', 'ok');
+        } catch (err) { toast(err.message, 'error', 6000); return false; }
+      },
+    }],
   });
 }
 
@@ -476,7 +616,7 @@ function showCorrection(t) {
     if (isNaN(n)) return { v, q: NaN };
     return { v, q: v.mode === 'uj' ? L.round3(n - st.keszlet) : n, n };
   };
-  modal({
+  return modal({
     title: 'Korrekció – ' + t.megnevezes,
     body: html`
       <p class="small muted">Leltár nélküli javítás (pl. sérült, elveszett, rosszul rögzített mennyiség).

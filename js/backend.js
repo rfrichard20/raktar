@@ -10,9 +10,15 @@ function networkError(msg = 'Nincs kapcsolat a szerverrel.') {
 }
 
 /* ===================== Apps Script ===================== */
+// Egy kérés legfeljebb ennyi ideig tarthat: a „beragadt” kapcsolat ne akassza meg a további szinkronokat.
+// (Megszakítás után az újraküldés biztonságos: a szerver a már feldolgozott műveleteket kihagyja.)
+const REQUEST_TIMEOUT = 60000;
+
 class RemoteBackend {
   async call(payload) {
     let res;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
     try {
       res = await fetch(CONFIG.API_URL, {
         method: 'POST',
@@ -20,9 +26,12 @@ class RemoteBackend {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
         redirect: 'follow',
+        signal: ctrl.signal,
       });
     } catch {
-      throw networkError();
+      throw networkError(ctrl.signal.aborted ? 'A szerver nem válaszolt időben – újrapróbálás hamarosan.' : undefined);
+    } finally {
+      clearTimeout(timer);
     }
     if (!res.ok) throw networkError('Szerverhiba (' + res.status + ').');
     let data;
@@ -31,14 +40,15 @@ class RemoteBackend {
     return data;
   }
   login(idToken) { return this.call({ action: 'login', idToken }); }
-  fetchAll(token) { return this.call({ action: 'adatok', token }); }
+  /** Teljes adat; ha a megadott verzió még aktuális, csak { unchanged: true } jön vissza (gyors). */
+  fetchAll(token, version) { return this.call({ action: 'adatok', token, version }); }
   sync(token, ops) { return this.call({ action: 'szinkron', token, ops }); }
 }
 
 /* ===================== Demo ===================== */
 // Ugyanazt a logikát (RaktarLogic.applyOp) futtatja, mint a valódi szerver, csak a böngészőben.
 class DemoBackend {
-  constructor() { this.db = null; }
+  constructor() { this.db = null; this.version = String(Date.now()); }
   async load() {
     if (this.db) return this.db;
     let data = await idb.get('demo:db');
@@ -47,7 +57,7 @@ class DemoBackend {
     return data;
   }
   async save() { await idb.set('demo:db', L.exportDb(this.db)); }
-  async reset() { this.db = L.generateDemoData(Date.now(), Math.floor(Math.random() * 1e9)); await this.save(); }
+  async reset() { this.db = L.generateDemoData(Date.now(), Math.floor(Math.random() * 1e9)); this.version = String(Date.now()); await this.save(); }
   get offline() { try { return localStorage.getItem('raktar:demoOffline') === '1'; } catch { return false; } }
   set offline(v) { try { localStorage.setItem('raktar:demoOffline', v ? '1' : '0'); } catch { /* */ } }
   async delay() {
@@ -70,21 +80,24 @@ class DemoBackend {
     const user = await this.user(email);
     return { ok: true, token: 'demo:' + email, user };
   }
-  async fetchAll(token) {
+  async fetchAll(token, version) {
     await this.delay();
     const user = await this.user(String(token).replace(/^demo:/, ''));
-    return { ok: true, user, data: this.snapshot(user) };
+    if (version && version === this.version) return { ok: true, user, unchanged: true, version };
+    return { ok: true, user, data: this.snapshot(user), version: this.version };
   }
   async sync(token, ops) {
     await this.delay();
     const user = await this.user(String(token).replace(/^demo:/, ''));
     const now = new Date().toISOString();
+    let changed = 0;
     const results = ops.map(op => {
-      try { L.applyOp(this.db, op, user, now); return { op_id: op.op_id, ok: true }; }
+      try { changed += L.applyOp(this.db, op, user, now).length; return { op_id: op.op_id, ok: true }; }
       catch (e) { return { op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba: ' + e.message }; }
     });
+    if (changed) this.version = String(Date.now());
     await this.save();
-    return { ok: true, results, user, data: this.snapshot(user) };
+    return { ok: true, results, user, data: this.snapshot(user), version: this.version };
   }
 }
 

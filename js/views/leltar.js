@@ -2,12 +2,12 @@
 // A beírt értékek minden billentyűleütéskor a készüléken tárolódnak; lezáráskor kerülnek a kimenő sorba.
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, matcher, compare, sortArrow, dateStamp, parseNum, confirmDialog, toast, help, popover, modal, sec, todayInput, dateInputToIso, copyText } from '../ui.js';
-import { attachPicker, itemSelector, templates, tplIds } from './common.js';
+import { attachPicker, itemSelector, templates, tplIds, filterButton, openFilter } from './common.js';
 
 const L = window.RaktarLogic;
 // Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } } }
 const slot = store.draftSlot('leltar');
-const ui = { q: '', onlyMissing: false, cats: new Set(), whs: new Set() };
+const ui = { q: '', onlyMissing: false, cats: new Set(), whs: new Set(), sSel: { ki: new Set() } };
 
 const save = slot.save;
 
@@ -36,10 +36,10 @@ const S_COLS = [
 
 function sessionRows() {
   const all = L.inventorySessions(store.state.db);
-  const f = ui.sf || (ui.sf = { q: '', ki: '', sort: 'datum', dir: -1 });
+  const f = ui.sf || (ui.sf = { q: '', sort: 'datum', dir: -1 });
   const match = matcher(f.q);
   const col = S_COLS.find(c => c[0] === f.sort) || S_COLS[0];
-  const list = all.filter(s => (!f.ki || s.kik.includes(f.ki)) &&
+  const list = all.filter(s => (!ui.sSel.ki.size || s.kik.some(k => ui.sSel.ki.has(k))) &&
     match(`${s.bizonylat} ${fmtDate(s.ig)} ${s.kik.map(e => store.userName(e)).join(' ')}`))
     .sort((a, b) => compare(col[2](a), col[2](b)) * f.dir);
   return { all, list, f };
@@ -68,7 +68,7 @@ function sessionsHtml() {
     <div class="card-head"><h2 class="grow">Korábbi leltárak</h2><span class="badge badge-muted">${all.length}</span></div>
     ${all.length ? html`<div class="toolbar card-toolbar">
       <input type="search" data-sq placeholder="Keresés (dátum, bizonylat, név)…" value="${f.q}">
-      ${users.length > 1 ? html`<select data-sk><option value="">Mindenki</option>${users.map(u => html`<option value="${u}" ${f.ki === u ? 'selected' : ''}>${store.userName(u)}</option>`)}</select>` : ''}
+      ${users.length > 1 ? filterButton(ui.sSel) : ''}
       ${help('Kattints egy sorra a leltár részleteiért (tételenként a megszámolt és a nyilvántartott érték). Az oszlopfejlécre kattintva rendezhetsz. „Eltérő”: ahány tételnél a megszámolt érték eltért a nyilvántartottól.')}
     </div>
     <div class="table-wrap" data-sbody>${sessionsBody()}</div>` : html`<div class="empty small">Még nincs rögzített leltár.</div>`}
@@ -137,10 +137,13 @@ function renderStart(root, ctx) {
   const cats = store.categories();
   const whs = store.warehouses();
   // Raktárválasztás csak akkor számít, ha több raktár van
-  const inWh = t => whs.length < 2 || !ui.whs.size || ui.whs.has(t.raktar);
-  const selectedNow = () => items.filter(t => inWh(t) && ui.cats.has(t.kategoria));
+  // Raktár és kategória külön-külön is elég: üres választás = mind (de legalább az egyiknél kell választás)
+  const multiWh = whs.length > 1;
+  const inWh = t => !multiWh || !ui.whs.size || ui.whs.has(t.raktar);
+  const inCat = t => !ui.cats.size || ui.cats.has(t.kategoria);
+  const selectedNow = () => (ui.cats.size || (multiWh && ui.whs.size) ? items.filter(t => inWh(t) && inCat(t)) : []);
   const selected = selectedNow();
-  const selText = [...(whs.length > 1 ? ui.whs : []), ...ui.cats].join(', ');
+  const selText = [...(multiWh ? ui.whs : []), ...ui.cats].join(', ');
   root.innerHTML = String(html`
     <div class="page-head"><h1>Leltár</h1>${help('Válaszd ki, mit számoltok meg. Részleges leltárnál a nem számolt tételek korábbi értéke marad érvényben. A beírt adatok a készüléken azonnal mentődnek, így internet nélkül is folytatható, és bezárás után sem vesznek el.')}</div>
     <div class="choice-row">
@@ -154,7 +157,7 @@ function renderStart(root, ctx) {
       </button>
       <div class="card choice" data-a="catpick" role="button" tabindex="0">
         <span class="big">${selected.length || '–'}</span>
-        <span class="grow" style="min-width:0"><b>Kategória szerint ▾</b>
+        <span class="grow" style="min-width:0"><b>${multiWh ? 'Raktár / kategória' : 'Kategória szerint'} ▾</b>
           <span class="small muted d-block ellipsis">${selText || 'kattints a kiválasztáshoz'}</span></span>
         ${selected.length ? html`<button class="btn btn-sm btn-primary" data-a="cat">Indítás</button>` : ''}
       </div>
@@ -219,9 +222,11 @@ function renderStart(root, ctx) {
   // Korábbi leltárak: szűrés és rendezés csak a táblázatot frissíti (a kereső fókusza megmarad)
   const refreshSessions = () => { const b = root.querySelector('[data-sbody]'); if (b) b.innerHTML = String(sessionsBody()); };
   root.querySelector('[data-sq]')?.addEventListener('input', e => { ui.sf.q = e.target.value; refreshSessions(); });
-  root.querySelector('[data-sk]')?.addEventListener('change', e => { ui.sf.ki = e.target.value; refreshSessions(); });
 
+  const sessionGroups = () => [{ key: 'ki', title: 'Rögzítette', options: [...new Set(L.inventorySessions(store.state.db).flatMap(s => s.kik))].map(u => [u, store.userName(u)]) }];
   root.onclick = e => {
+    const fb = e.target.closest('[data-filter]');
+    if (fb) return openFilter(fb, sessionGroups, ui.sSel, refreshSessions);
     const th = e.target.closest('[data-ssort]');
     if (th) {
       const k = th.dataset.ssort;

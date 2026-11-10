@@ -1,7 +1,7 @@
 // Beérkezés: rendelés alapján (pipálással) vagy rendelés nélkül.
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, parseNum, confirmDialog, toast, todayInput, dateInputToIso, help, matcher, compare, sortArrow, ORDER_STATUS } from '../ui.js';
-import { attachPicker } from './common.js';
+import { attachPicker, enterBackHtml, bindEnterBack, filterButton, openFilter, inSel } from './common.js';
 import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
@@ -20,7 +20,7 @@ function startFree() {
 }
 
 // Nyitott rendelések táblázata: [kulcs, fejléc, rendezési érték, osztály]
-const ui = { q: '', st: '', sort: 'datum', dir: -1 };
+const ui = { q: '', f: { st: new Set() }, sort: 'datum', dir: -1 };
 const O_COLS = [
   ['besz', 'Beszállító', x => store.supplierName(x.o.beszallito_id), ''],
   ['azon', 'Rendelés', x => x.o.rendeles_id, ''],
@@ -33,7 +33,7 @@ function startBody() {
   const match = matcher(ui.q);
   const col = O_COLS.find(c => c[0] === ui.sort) || O_COLS[2];
   const list = store.openOrders().map(x => ({ ...x, open: x.info.sorok.filter(s => !s.lezarva).length }))
-    .filter(x => (!ui.st || x.info.statusz === ui.st) && match(store.orderSearchText(x.o)))
+    .filter(x => inSel(ui.f.st, x.info.statusz) && match(store.orderSearchText(x.o)))
     .sort((a, b) => compare(col[2](a), col[2](b)) * ui.dir);
   return html`<table class="tbl cards fixed nochk">
     <colgroup><col><col style="width:22%"><col style="width:14%"><col style="width:12%"><col style="width:17%"></colgroup>
@@ -47,7 +47,7 @@ function startBody() {
         <td class="num c-f2" data-l="Nyitott sor">${open} / ${info.sorok.length}</td>
         <td class="c-f3" data-l="Állapot"><span class="badge badge-${cls}">${lbl}</span></td>
       </tr>`;
-    }) : html`<tr><td colspan="5" class="empty">${ui.q || ui.st ? 'Nincs a szűrésnek megfelelő rendelés.' : 'Nincs nyitott rendelés.'}</td></tr>`}</tbody></table>`;
+    }) : html`<tr><td colspan="5" class="empty">${ui.q || ui.f.st.size ? 'Nincs a szűrésnek megfelelő rendelés.' : 'Nincs nyitott rendelés.'}</td></tr>`}</tbody></table>`;
 }
 
 function renderStart(root, ctx) {
@@ -59,16 +59,16 @@ function renderStart(root, ctx) {
       <div class="card-head"><h2 class="grow">Nyitott rendelések</h2><span class="badge badge-info">${count}</span></div>
       ${count ? html`<div class="toolbar card-toolbar">
         <input type="search" data-oq placeholder="Keresés (beszállító, rendelésszám, azonosító)…" value="${ui.q}">
-        <select data-ost><option value="">Minden állapot</option>
-          <option value="nyitott" ${ui.st === 'nyitott' ? 'selected' : ''}>${ORDER_STATUS.nyitott[0]}</option>
-          <option value="reszben" ${ui.st === 'reszben' ? 'selected' : ''}>${ORDER_STATUS.reszben[0]}</option></select>
+        ${filterButton(ui.f)}
       </div>` : ''}
       <div class="table-wrap" data-obody>${startBody()}</div>
     </div>`);
   const refresh = () => { root.querySelector('[data-obody]').innerHTML = String(startBody()); };
+  const groups = () => [{ key: 'st', title: 'Állapot', options: ['nyitott', 'reszben'].map(k => [k, ORDER_STATUS[k][0]]) }];
   root.querySelector('[data-oq]')?.addEventListener('input', e => { ui.q = e.target.value; refresh(); });
-  root.querySelector('[data-ost]')?.addEventListener('change', e => { ui.st = e.target.value; refresh(); });
   root.onclick = e => {
+    const fb = e.target.closest('[data-filter]');
+    if (fb) return openFilter(fb, groups, ui.f, refresh);
     const th = e.target.closest('[data-osort]');
     if (th) { const k = th.dataset.osort; ui.dir = ui.sort === k ? -ui.dir : (k === 'datum' || k === 'nyitott' ? -1 : 1); ui.sort = k; return refresh(); }
     const r = e.target.closest('[data-r]');
@@ -201,7 +201,7 @@ function renderFree(root, ctx) {
       ${headerFields()}
     </div>
     <div class="card">
-      <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div></div>
+      <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div>${enterBackHtml()}</div>
       ${slot.draft.items.length ? html`<div class="table-wrap"><table class="tbl cards nochk"><thead><tr><th>Tétel</th><th class="w-qty">Mennyiség</th><th style="width:50px"></th></tr></thead>
         <tbody>${slot.draft.items.map((it, i) => {
           const t = store.itemOrStub(it.tetel_id);
@@ -214,6 +214,7 @@ function renderFree(root, ctx) {
         <button class="btn btn-sm btn-primary" data-a="save">Rögzítés</button></div>
     </div>`);
   bindHeader(root);
+  bindEnterBack(root.querySelector('#add'));
   attachPicker(root.querySelector('#add'), {
     items: () => {
       const list = store.activeItems();

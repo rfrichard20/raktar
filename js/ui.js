@@ -19,8 +19,10 @@ export function html(strings, ...vals) {
   return new Raw(out);
 }
 
-const numFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 2 });
-const moneyFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 0 });
+// Ezres tagolás minden számnál (1 234). A magyar alapbeállítás csak 5 jegytől tagolna ('always' nélkül);
+// régebbi böngészőben ilyenkor marad az alapértelmezett tagolás.
+const numFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 2, useGrouping: 'always' });
+const moneyFmt = new Intl.NumberFormat('hu-HU', { maximumFractionDigits: 0, useGrouping: 'always' });
 export const fmtNum = n => (n == null || n === '' ? '–' : numFmt.format(n));
 export const fmtMoney = n => moneyFmt.format(Math.round(n || 0)) + ' Ft';
 /* Dátumok – minden formázás ezekből a segédekből megy, egységes alakban */
