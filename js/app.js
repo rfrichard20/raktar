@@ -14,20 +14,27 @@ import fiok from './views/fiok.js';
 import login from './views/login.js';
 import { attachPicker, showItemDetail } from './views/common.js';
 
+/**
+ * Menücsoportok (témák): asztalon az oldalsáv csoportcímei, mobilon a „Több” lista szakaszai, ebben a sorrendben.
+ * Új menüpont: a ROUTES-ba, egy meglévő (vagy új) csoporttal.
+ */
+const GROUPS = { keszlet: 'Készlet', muveletek: 'Raktári műveletek', beszerzes: 'Beszerzés', beallitasok: 'Beállítások' };
+
+// A ROUTES sorrendje az alapértelmezett menüsorrend (mobilon az első NAV_MAX az alsó sávban)
 const ROUTES = {
-  attekinto: { view: attekinto, label: 'Áttekintő', icon: 'grid', role: 'olvaso' },
-  leltar: { view: leltar, label: 'Leltár', icon: 'clipboard', role: 'raktaros',
+  attekinto: { view: attekinto, label: 'Áttekintő', icon: 'grid', role: 'olvaso', group: 'keszlet' },
+  leltar: { view: leltar, label: 'Leltár', icon: 'clipboard', role: 'raktaros', group: 'muveletek',
     badge: () => ({ n: store.activeItems().filter(t => store.state.stock[t.tetel_id]?.esedekes).length, text: 'esedékes leltár' }) },
-  beerkezes: { view: beerkezes, label: 'Beérkezés', icon: 'inbox', role: 'raktaros',
+  beerkezes: { view: beerkezes, label: 'Beérkezés', icon: 'inbox', role: 'raktaros', group: 'muveletek',
     badge: () => ({ n: store.openOrders().length, text: 'várható szállítás' }) },
-  kivet: { view: kivet, label: 'Kivét', icon: 'out', role: 'szerelo' },
+  kivet: { view: kivet, label: 'Kivét', icon: 'out', role: 'szerelo', group: 'muveletek' },
   // badge: a menüpont értesítése (darabszám + magyarázat); 0-nál nem látszik
-  rendelesek: { view: rendelesek, label: 'Rendelés', icon: 'cart', role: 'rendeles',
+  rendelesek: { view: rendelesek, label: 'Rendelés', icon: 'cart', role: 'rendeles', group: 'beszerzes',
     badge: () => ({ n: Object.values(store.state.stock).filter(x => x.javaslat > 0).length, text: 'pótolandó tétel' }) },
-  kimutatasok: { view: kimutatasok, label: 'Kimutatás', icon: 'chart', role: 'kimutatas' },
-  mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'olvaso' },
+  kimutatasok: { view: kimutatasok, label: 'Kimutatás', icon: 'chart', role: 'kimutatas', group: 'keszlet' },
+  mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'olvaso', group: 'keszlet' },
   // Raktáros is eléri, de nála csak a Leltársablonok fül látszik
-  torzsadatok: { view: torzsadatok, label: 'Törzsadatok', icon: 'database', role: 'raktaros' },
+  torzsadatok: { view: torzsadatok, label: 'Törzsadatok', icon: 'database', role: 'raktaros', group: 'beallitasok' },
   fiok: { view: fiok, label: 'Fiók', icon: 'user', role: 'olvaso', bottom: true },
 };
 
@@ -49,7 +56,7 @@ const NAV_MAX = store.NAV_MAX;
 
 /** A felhasználó számára elérhető menüpontok a saját sorrendjében (a Fiók nélkül: mobilon a jobb felső monogram). */
 export function navRoutes() {
-  const all = Object.entries(ROUTES).filter(([k, r]) => k !== 'fiok' && store.can(r.role)).map(([key, r]) => ({ key, label: r.label, icon: r.icon }));
+  const all = Object.entries(ROUTES).filter(([k, r]) => k !== 'fiok' && store.can(r.role)).map(([key, r]) => ({ key, label: r.label, icon: r.icon, group: r.group }));
   const own = store.getNavOrder() || [];
   const pos = k => { const i = own.indexOf(k); return i < 0 ? own.length + all.findIndex(r => r.key === k) : i; };
   return all.sort((a, b) => pos(a.key) - pos(b.key));
@@ -58,6 +65,12 @@ export function navRoutes() {
 export function navPinned() {
   const keys = navRoutes().map(r => r.key);
   return keys.length <= NAV_MAX + 1 ? keys : keys.slice(0, NAV_MAX);
+}
+
+/** Menüpontok csoportosítva: [{ key, title, items }] – csoportonként a saját sorrendben, üres csoport nélkül. */
+export function navGroups(items = navRoutes()) {
+  return Object.entries(GROUPS).map(([key, title]) => ({ key, title, items: items.filter(r => r.group === key) }))
+    .filter(g => g.items.length);
 }
 
 /** Egy menüpont értesítése: { n, text } vagy null. */
@@ -72,9 +85,14 @@ function renderNav(active) {
   // A „Több” gomb a benne lévő menüpontok értesítéseit összesítve mutatja (a listában menüpontonként látszanak)
   const extraBadges = extra.map(badgeOf).filter(Boolean);
   const moreBadge = extraBadges.length ? { n: extraBadges.reduce((a, b) => a + b.n, 0) } : null;
-  // A saját sorrend CSS order-rel (--o) érvényesül; a Fiók mindig a végén. Mobilon a .nav-extra helyett „Több” gomb.
-  $('nav').innerHTML = String(html`${links.map(([key, r]) => html`
-    <a href="#/${key}" style="--o:${order.includes(key) ? order.indexOf(key) : 99}" class="${key === active ? 'active' : ''} ${r.bottom ? 'nav-bottom' : ''} ${extra.includes(key) ? 'nav-extra' : ''}">
+  // Sorrend CSS order-rel: mobilon a saját sorrend (--o), asztalon csoportonként, a csoporton belül a saját
+  // sorrendben (--og; a csoportcím a csoport első eleme). A Fiók mindig a végén. Mobilon a .nav-extra helyett „Több” gomb.
+  const groups = navGroups();
+  const og = {};
+  groups.forEach((g, gi) => g.items.forEach((r, i) => { og[r.key] = gi * 50 + i + 1; }));
+  $('nav').innerHTML = String(html`${groups.map((g, gi) => html`<div class="nav-group" style="--og:${gi * 50}">${g.title}</div>`)}
+    ${links.map(([key, r]) => html`
+    <a href="#/${key}" style="--o:${order.includes(key) ? order.indexOf(key) : 99};--og:${og[key] ?? 999}" class="${key === active ? 'active' : ''} ${r.bottom ? 'nav-bottom' : ''} ${extra.includes(key) ? 'nav-extra' : ''}">
       ${ICONS[r.icon]}<span class="lbl">${r.label}</span>${badgeHtml(badgeOf(key))}
     </a>`)}
     ${extra.length ? html`<button type="button" class="nav-more ${extra.includes(active) ? 'active' : ''}" data-navmore aria-label="További menüpontok">
@@ -87,8 +105,13 @@ $('nav').addEventListener('click', e => {
   if (!b) return;
   const pinned = navPinned();
   const extra = navRoutes().filter(r => !pinned.includes(r.key));
-  popover(b, html`<div class="nav-pop">${extra.map(r => { const bd = badgeOf(r.key); return html`<a class="pop-item ${current && current.name === r.key ? 'sel' : ''}" href="#/${r.key}">${ICONS[r.icon]}
-      <span class="grow">${r.label}${bd ? html`<span class="small muted d-block">${bd.n} ${bd.text}</span>` : ''}</span>${badgeHtml(bd)}</a>`; })}</div>`, {
+  // Több csoportnál csoportcímekkel (mint asztalon az oldalsáv)
+  const groups = navGroups(extra);
+  const item = r => { const bd = badgeOf(r.key); return html`<a class="pop-item ${current && current.name === r.key ? 'sel' : ''}" href="#/${r.key}">${ICONS[r.icon]}
+      <span class="grow">${r.label}${bd ? html`<span class="small muted d-block">${bd.n} ${bd.text}</span>` : ''}</span>${badgeHtml(bd)}</a>`; };
+  popover(b, html`<div class="nav-pop">${groups.length > 1
+    ? groups.map(g => html`<div class="pop-title">${g.title}</div>${g.items.map(item)}`)
+    : extra.map(item)}</div>`, {
     minWidth: 220,
     onMount: (p, close) => p.addEventListener('click', ev => { if (ev.target.closest('a')) close(); }),
   });

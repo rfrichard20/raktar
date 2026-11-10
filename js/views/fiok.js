@@ -63,7 +63,7 @@ export default {
       ${navRoutes().length > NAV_FIT ? html`<div class="card">
         <div class="card-head"><h2 class="grow">Menü sorrendje</h2>
           ${store.getNavOrder() ? html`<button class="link-btn small" data-a="navreset">Alapértelmezett</button>` : ''}</div>
-        <p class="small muted card-note">A menüpontok ebben a sorrendben látszanak. Mobilon az első ${NAV_PICK} az alsó sávban van, a többi a „Több” menüben. Csak ezen az eszközön érvényes.</p>
+        <p class="small muted card-note">Mobilon az első ${NAV_PICK} menüpont az alsó sávban van, a többi a „Több” menüben. Asztalon az oldalsávban témánként csoportosítva látszanak, a csoporton belül ebben a sorrendben. Csak ezen az eszközön érvényes.</p>
         ${navRoutes().map((r, i, all) => html`
           ${i === NAV_PICK ? html`<div class="list-sep">„Több” menüben</div>` : ''}
           <div class="list-row">${ICONS[r.icon]}<span class="grow">${r.label}</span>

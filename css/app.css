@@ -195,7 +195,12 @@ p { margin: 0 0 .75rem; }
   .nav { position: sticky; top: var(--top-h); height: calc(100vh - var(--top-h)); padding: .75rem; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
   .nav .nav-bottom { margin-top: auto; }
   .nav .nav-more { display: none; } /* asztalon minden menüpont látszik, nincs „Több” */
+  /* Témánként csoportosítva (app.js → GROUPS, --og): csoportcím, alatta a csoport menüpontjai a saját sorrendben */
+  .nav a, .nav .nav-group { order: var(--og, 0); }
+  .nav .nav-group { padding: .9rem .9rem .3rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .nav .nav-group:first-child { padding-top: .2rem; }
 }
+@media (max-width: 899px) { .nav .nav-group { display: none; } }
 @media (max-width: 899px) {
   .nav {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: flex; justify-content: space-around;
