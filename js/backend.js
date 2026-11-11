@@ -99,7 +99,7 @@ class DemoBackend {
     let changed = 0;
     const results = ops.map(op => {
       try { changed += L.applyOp(this.db, op, user, now).length; return { op_id: op.op_id, ok: true }; }
-      catch (e) { return { op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba: ' + e.message }; }
+      catch (e) { if (!e.validation) console.error(e); return { op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba (hibás szerkezetű művelet).' }; }
     });
     if (changed) this.version = String(Date.now());
     await this.save();

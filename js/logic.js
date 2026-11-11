@@ -196,6 +196,22 @@ var RaktarLogic = (function () {
   }
   function need(user, role) { if (!hasRole(user, role)) fail('Nincs jogosultságod ehhez a művelethez.'); }
 
+  /* ---------- Bemenet-korlátok (a szerver ezekkel védi az adatot a hibás vagy rosszindulatú kérésektől) ---------- */
+  var MAX_ROWS = 5000;          // egy műveletben legfeljebb ennyi sor (teljes leltár is belefér)
+  var MAX_QTY = 10000000;       // egy mozgás / rendelési sor mennyiségének felső határa
+  var BACKDATE_DAYS = 31;       // Szerelő ennyi napnál régebbi kivétet nem rögzíthet (raktárostól felfelé szabad)
+  /** Saját kulcs-e (a beépített nevek – pl. constructor, __proto__ – nem számítanak érvényes értéknek). */
+  function own(obj, key) { return typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key); }
+  /** Új rekord azonosítója: csak betű, szám, pont, kötőjel, aláhúzás (képlet, HTML, szóköz nem lehet benne). */
+  function checkId(id) { if (!/^[\w.\-]{1,60}$/.test(String(id))) fail('Érvénytelen azonosító.'); }
+  /** A művelet sorai: tömb, objektumokkal, a megengedett darabszámon belül. */
+  function rowsOf(list, emptyMsg) {
+    if (!Array.isArray(list) || !list.length) fail(emptyMsg);
+    if (list.length > MAX_ROWS) fail('Túl sok sor egy műveletben (legfeljebb ' + MAX_ROWS + ').');
+    list.forEach(function (r) { if (!r || typeof r !== 'object') fail('Hibás sor a műveletben.'); });
+    return list;
+  }
+
   /* ---------- Műveletek ---------- */
   /**
    * Egy művelet alkalmazása. Előbb mindent ellenőriz, csak utána módosít.
@@ -226,21 +242,21 @@ var RaktarLogic = (function () {
         need(user, 'raktaros');
         remove(db, 'Leltar_sablonok', op.sablon_id, changes);
         break;
-      default: fail('Ismeretlen művelet: ' + (op && op.type));
+      default: fail('Ismeretlen művelet.');
     }
     return changes;
   }
 
   function opMozgasok(db, op, user, now, changes) {
-    var rows = op.rows || [];
-    if (!rows.length) fail('Nincs rögzítendő tétel.');
+    var rows = rowsOf(op.rows, 'Nincs rögzítendő tétel.');
     var fresh = [], seen = {};
     rows.forEach(function (r0) {
       var r = normalize('Mozgasok', r0);
       if (!r.mozgas_id) fail('Hiányzó mozgás-azonosító.');
       if (get(db, 'Mozgasok', r.mozgas_id) || seen[r.mozgas_id]) return; // már feldolgozva
+      checkId(r.mozgas_id);
       seen[r.mozgas_id] = 1;
-      if (!MOVE_TYPES[r.tipus]) fail('Ismeretlen mozgástípus: ' + r.tipus);
+      if (!own(MOVE_TYPES, r.tipus)) fail('Ismeretlen mozgástípus.');
       need(user, r.tipus === 'KIVET' ? 'szerelo' : 'raktaros');
       var t = get(db, 'Tetelek', r.tetel_id);
       if (!t) fail('Ismeretlen tétel: ' + r.tetel_id);
@@ -258,9 +274,14 @@ var RaktarLogic = (function () {
         if (s.tetel_id !== r.tetel_id) fail('A rendelési sor más tételre vonatkozik.');
         if (r.tipus !== 'BEERKEZES') fail('Rendelési sorhoz csak beérkezés köthető.');
       }
+      if (Math.abs(r.mennyiseg) > MAX_QTY) fail('Túl nagy mennyiség (' + t.megnevezes + ').');
       if (!r.datum) r.datum = now;
       // Jövőbeli dátum torzítaná a készletet (a felület sem engedi); 1 nap tűrés az eltérő órák / időzónák miatt
       if (Date.parse(r.datum) > Date.parse(now) + 86400000) fail('A mozgás dátuma nem lehet a jövőben (' + t.megnevezes + ').');
+      // Visszadátumozás: a Szerelő csak a közelmúltra rögzíthet (régi dátummal ne lehessen „elrejteni” egy kivétet)
+      if (!hasRole(user, 'raktaros') && Date.parse(r.datum) < Date.parse(now) - BACKDATE_DAYS * 86400000) {
+        fail('Ennél régebbi dátumra (' + BACKDATE_DAYS + ' nap) csak raktáros rögzíthet (' + t.megnevezes + ').');
+      }
       r.felhasznalo = user.email;
       r.rogzitve = now;
       fresh.push(r);
@@ -290,12 +311,14 @@ var RaktarLogic = (function () {
     var o = normalize('Rendelesek', op.rendeles);
     if (!o.rendeles_id) fail('Hiányzó rendelés-azonosító.');
     if (get(db, 'Rendelesek', o.rendeles_id)) return; // már létezik
-    var sorok = (op.sorok || []).map(function (s) { return normalize('Rendeles_tetelek', s); });
-    if (!sorok.length) fail('A rendelés nem tartalmaz tételt.');
+    checkId(o.rendeles_id);
+    var sorok = rowsOf(op.sorok, 'A rendelés nem tartalmaz tételt.').map(function (s) { return normalize('Rendeles_tetelek', s); });
     if (o.beszallito_id && !get(db, 'Beszallitok', o.beszallito_id)) fail('Ismeretlen beszállító.');
     var sorIds = {};
     sorok.forEach(function (s) {
       if (!s.sor_id) fail('Hiányzó rendelési sor azonosító.');
+      checkId(s.sor_id);
+      if (s.mennyiseg > MAX_QTY) fail('Túl nagy mennyiség.');
       // Ütköző azonosító ne írhasson felül egy másik rendeléshez tartozó sort
       if (get(db, 'Rendeles_tetelek', s.sor_id) || sorIds[s.sor_id]) fail('Ismétlődő rendelési sor azonosító.');
       sorIds[s.sor_id] = 1;
@@ -349,10 +372,11 @@ var RaktarLogic = (function () {
   function opMentes(db, op, user, now, changes) {
     need(user, 'admin');
     var table = op.table;
-    if (!EDITABLE[table]) fail('Ez a tábla nem szerkeszthető.');
+    if (!own(EDITABLE, table)) fail('Ez a tábla nem szerkeszthető.');
     var r = normalize(table, op.row);
     var k = SCHEMA[table].key;
     if (!r[k]) fail('Hiányzó azonosító.');
+    if (table !== 'Felhasznalok' && !get(db, table, r[k])) checkId(r[k]); // új rekord (a felhasználó kulcsa az e-mail-cím)
     if (table === 'Tetelek') {
       if (!r.megnevezes) fail('A megnevezés kötelező.');
       if (r.min_keszlet < 0 || r.cel_keszlet < 0) fail('A készletszint nem lehet negatív.');
@@ -369,7 +393,7 @@ var RaktarLogic = (function () {
       if (r.tipus !== 'rendeles' && r.tipus !== 'ajanlat') fail('Érvénytelen sablontípus.');
       if (!r.szoveg) fail('A sablon szövege nem lehet üres.');
     } else if (table === 'Listak') {
-      if (!LIST_TYPES[r.tipus]) fail('Ismeretlen lista típus.');
+      if (!own(LIST_TYPES, r.tipus)) fail('Ismeretlen lista típus.');
       if (!r.ertek) fail('Az érték nem lehet üres.');
       var dupL = (db.Listak || []).some(function (x) {
         return x.tipus === r.tipus && x.lista_id !== r.lista_id && String(x.ertek).toLowerCase() === r.ertek.toLowerCase();
@@ -377,7 +401,7 @@ var RaktarLogic = (function () {
       if (dupL) fail('Ez az érték már szerepel a listában: ' + r.ertek);
     } else if (table === 'Felhasznalok') {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email)) fail('Érvénytelen e-mail-cím.');
-      if (!ROLES[r.szerepkor]) fail('Érvénytelen szerepkör.');
+      if (!own(ROLES, r.szerepkor)) fail('Érvénytelen szerepkör.');
       if (r.email === String(user.email).toLowerCase() && (r.szerepkor !== 'admin' || !r.aktiv)) {
         fail('A saját admin jogosultságodat nem veheted el.');
       }
@@ -399,6 +423,7 @@ var RaktarLogic = (function () {
     var t = normalize('Tetelek', op.tetel);
     if (!t.tetel_id) fail('Hiányzó tétel azonosító.');
     if (get(db, 'Tetelek', t.tetel_id)) return; // már létrejött
+    checkId(t.tetel_id);
     if (!t.megnevezes) fail('A megnevezés kötelező.');
     var nev = t.megnevezes.toLowerCase();
     if ((db.Tetelek || []).some(function (x) { return String(x.megnevezes).toLowerCase() === nev; })) {
@@ -410,6 +435,7 @@ var RaktarLogic = (function () {
     if (op.forras && op.forras.beszallito_id) {
       f = normalize('Forrasok', op.forras);
       if (!f.forras_id) fail('Hiányzó forrás azonosító.');
+      checkId(f.forras_id);
       if (get(db, 'Forrasok', f.forras_id)) fail('Ismétlődő forrás azonosító.'); // más tétel forrását ne írja felül
       if (!get(db, 'Beszallitok', f.beszallito_id)) fail('Ismeretlen beszállító.');
       f.tetel_id = t.tetel_id;
@@ -442,6 +468,7 @@ var RaktarLogic = (function () {
     if (!ids.length) fail('A sablon nem tartalmaz tételt.');
     s.tetelek = ids.join(',');
     var ex = get(db, 'Leltar_sablonok', s.sablon_id);
+    if (!ex) checkId(s.sablon_id);
     s.letrehozta = ex ? ex.letrehozta : user.email;
     s.modositva = now;
     put(db, 'Leltar_sablonok', s, changes);
@@ -449,7 +476,7 @@ var RaktarLogic = (function () {
 
   function opTorles(db, op, user, changes) {
     need(user, 'admin');
-    if (!DELETABLE[op.table]) fail('Ebből a táblából nem lehet törölni (használd az „aktív” jelölőt).');
+    if (!own(DELETABLE, op.table)) fail('Ebből a táblából nem lehet törölni (használd az „aktív” jelölőt).');
     remove(db, op.table, op.id, changes);
   }
 
@@ -924,7 +951,7 @@ var RaktarLogic = (function () {
   }
 
   return {
-    ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, MOVE_TYPES: MOVE_TYPES, SCHEMA: SCHEMA, TABLES: TABLES,
+    ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, MOVE_TYPES: MOVE_TYPES, SCHEMA: SCHEMA, TABLES: TABLES, BACKDATE_DAYS: BACKDATE_DAYS,
     normalize: normalize, round3: round3,
     newId: newId, get: get, exportDb: exportDb, cloneDb: cloneDb,
     can: can, PERMS: PERMS, filterSnapshot: filterSnapshot, applyOp: applyOp, computeStock: computeStock, orderInfo: orderInfo,

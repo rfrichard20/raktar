@@ -1,7 +1,7 @@
 // Service worker: az alkalmazás fájljait gyorsítótárazza, így internet nélkül is elindul.
 // Stratégia: hálózat elsőként (rövid időkorláttal), hiba esetén a gyorsítótárból.
 // Új verzió kiadásakor elég a VERSION értékét növelni.
-const VERSION = 'raktar-v48';
+const VERSION = 'raktar-v49';
 const FONTS = ['400', '500', '600', '700'].flatMap(w => ['latin', 'latin-ext'].map(s => `fonts/poppins-${w}-${s}.woff2`));
 const ASSETS = [
   ...FONTS, './', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'css/app.css',

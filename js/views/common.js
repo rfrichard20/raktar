@@ -480,10 +480,12 @@ export function kivetFields(v = {}) {
   const db = store.state.db;
   const users = (db.Felhasznalok || []).map(u => u.nev || u.email).sort((a, b) => a.localeCompare(b, 'hu'));
   const munkak = store.recentValues(db.Mozgasok.filter(m => m.tipus === 'KIVET'), 'munka', 'datum');
+  // Szerelő csak a közelmúltra rögzíthet (a szerver is ezt ellenőrzi: RaktarLogic.BACKDATE_DAYS)
+  const minDate = store.can('raktaros') ? '' : new Date(Date.now() - (L.BACKDATE_DAYS - 1) * 86400000).toISOString().slice(0, 10);
   return html`
     <label class="field"><span>Átvevő *</span>${suggestInput('atvevo', v.atvevo ?? store.userName(store.state.user.email), users, 'ki vitte el')}</label>
     <label class="field"><span>Munka / projekt</span>${suggestInput('munka', v.munka, munkak, 'pl. MiniCRM azonosító')}</label>
-    <label class="field"><span>Dátum</span><input type="date" name="datum" value="${v.datum || todayInput()}" max="${todayInput()}"></label>
+    <label class="field"><span>Dátum</span><input type="date" name="datum" value="${v.datum || todayInput()}" max="${todayInput()}" ${minDate ? html`min="${minDate}"` : ''}></label>
     <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" value="${v.megjegyzes || ''}" placeholder="opcionális"></label>`;
 }
 
