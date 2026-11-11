@@ -2,12 +2,14 @@
 // A beírt értékek minden billentyűleütéskor a készüléken tárolódnak; lezáráskor kerülnek a kimenő sorba.
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, matcher, compare, sortArrow, dateStamp, parseNum, confirmDialog, toast, help, popover, modal, sec, todayInput, dateInputToIso, copyText } from '../ui.js';
-import { attachPicker, itemSelector, templates, tplIds, filterButton, openFilter } from './common.js';
+import { addOffers, itemSelector, templates, tplIds, filterButton, openFilter, inSel, countOptions } from './common.js';
 
 const L = window.RaktarLogic;
 // Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } } }
 const slot = store.draftSlot('leltar');
-const ui = { q: '', onlyMissing: false, cats: new Set(), whs: new Set(), sSel: { ki: new Set() } };
+// cats / whs: indítás (raktár / kategória választó); cf: a számlálólap szűrője; sSel: korábbi leltárak szűrője
+const ui = { q: '', cats: new Set(), whs: new Set(), sSel: { ki: new Set() },
+  cf: { wh: new Set(), polc: new Set(), cat: new Set(), egyeb: new Set() } };
 
 const save = slot.save;
 
@@ -20,7 +22,7 @@ function start(ids, label) {
     id: `LT-${dateStamp(d)}-${L.newId('', 4)}`,
     label, started: d.toISOString(), items: sortItems(ids), counts: {},
   };
-  ui.q = ''; ui.onlyMissing = false;
+  ui.q = ''; Object.values(ui.cf).forEach(x => x.clear());
   save();
 }
 
@@ -169,33 +171,11 @@ function renderStart(root, ctx) {
     </div>
     ${sessionsHtml()}`);
 
-  const openPicker = anchor => {
-    const count = c => items.filter(t => t.kategoria === c && inWh(t)).length;
-    const body = () => html`
-      ${whs.length > 1 ? html`<div class="pop-title">Raktár</div>${whs.map(w => html`<label class="pop-item"><input type="checkbox" data-wh="${w}" ${ui.whs.has(w) ? 'checked' : ''}><span class="grow">${w}</span></label>`)}` : ''}
-      <div class="pop-title">Kategória</div>
-      ${cats.map(c => html`<label class="pop-item"><input type="checkbox" data-cat="${c}" ${ui.cats.has(c) ? 'checked' : ''}><span class="grow">${c}</span><span class="small muted">${count(c)}</span></label>`)}
-      <div class="pop-foot"><span class="small"><b>${selectedNow().length}</b> tétel</span>
-        <span><button class="btn btn-sm btn-link-danger" data-x="clear">Törlés</button> <button class="btn btn-sm btn-primary" data-x="ok">Kész</button></span></div>`;
-    popover(anchor, body(), {
-      minWidth: 280,
-      onClose: () => ctx.rerender(),
-      onMount: (el, close) => {
-        el.addEventListener('change', e => {
-          const c = e.target.dataset.cat, w = e.target.dataset.wh;
-          if (c) e.target.checked ? ui.cats.add(c) : ui.cats.delete(c);
-          if (w) e.target.checked ? ui.whs.add(w) : ui.whs.delete(w);
-          el.innerHTML = String(body());
-        });
-        el.addEventListener('click', e => {
-          const x = e.target.closest('[data-x]');
-          if (!x) return;
-          if (x.dataset.x === 'clear') { ui.cats.clear(); ui.whs.clear(); el.innerHTML = String(body()); }
-          else close();
-        });
-      },
-    });
-  };
+  // Raktár / kategória választó: a közös checkboxos legördülő (a kategóriák darabszáma a választott raktárakra értendő)
+  const openPicker = anchor => openFilter(anchor, () => [
+    { key: 'whs', title: 'Raktár', options: multiWh ? countOptions(whs, items, 'raktar') : [] },
+    { key: 'cats', title: 'Kategória', options: cats.map(c => [c, c, items.filter(t => t.kategoria === c && inWh(t)).length]) },
+  ], { whs: ui.whs, cats: ui.cats }, null, { summary: () => html`<b>${selectedNow().length}</b> tétel`, onClose: () => ctx.rerender() });
 
   const openCustom = anchor => {
     const list = templates();
@@ -258,16 +238,17 @@ function diffClass(d, nyilv) {
 }
 const fmtDiff = d => `${d > 0 ? '+' : ''}${fmtNum(d)}`;
 
-function diffText(id) {
+/** Az „Eltérés” oszlop tartalma: üres, amíg nincs megszámolva; 0 szürkén; egyébként előjellel, a mérték szerinti színnel. */
+function diffCell(id) {
   const c = slot.draft.counts[id];
   if (!c) return '';
   const st = store.state.stock[id];
-  const t = store.get('Tetelek', id);
   const d = L.round3(c.q - st.keszlet);
-  if (!d) return html`<span class="t-ok">✓ Egyezik a nyilvántartással</span>`;
-  return html`<span class="${diffClass(d, st.keszlet)}">${d > 0 ? 'Többlet' : 'Hiány'} a nyilvántartotthoz képest: ${fmtDiff(d)} ${t.mertekegyseg}</span>`;
+  if (!d) return html`<span class="muted" title="Egyezik a nyilvántartással">0</span>`;
+  return html`<span class="${diffClass(d, st.keszlet)}" title="${d > 0 ? 'Többlet' : 'Hiány'} a nyilvántartotthoz képest">${fmtDiff(d)}</span>`;
 }
 
+// Sor: név + adatok | eltérés (fix oszlop – beíráskor nem mozdul a lista) | megszámolt mennyiség
 function rowHtml(id) {
   const t = store.get('Tetelek', id);
   const st = store.state.stock[id];
@@ -275,9 +256,22 @@ function rowHtml(id) {
   return html`<div class="count-row ${c ? 'done' : ''}" data-id="${id}">
     <div><div class="name">${t.megnevezes}</div>
       <div class="meta">${store.placeLabel(t)} · nyilvántartott: ${fmtNum(st.keszlet)} ${t.mertekegyseg} · előző leltár: ${fmtDate(st.leltarDatum)}</div></div>
+    <div class="diff">${diffCell(id)}</div>
     <input type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="${t.mertekegyseg}" value="${c ? String(c.q) : ''}" aria-label="${t.megnevezes} mennyiség">
-    <div class="diff">${diffText(id)}</div>
   </div>`;
+}
+
+/** A számlálólap szűrő csoportjai: a leltárban lévő tételek raktárai, polcai, kategóriái (darabszámmal). */
+function countGroups(ids) {
+  const items = ids.map(id => store.get('Tetelek', id));
+  const uniq = f => [...new Set(items.map(t => t[f]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu', { numeric: true }));
+  const whs = uniq('raktar');
+  return [
+    { key: 'wh', title: 'Raktár', options: whs.length > 1 ? countOptions(whs, items, 'raktar') : [] },
+    { key: 'polc', title: 'Polc / hely', options: countOptions(uniq('polc'), items, 'polc') },
+    { key: 'cat', title: 'Kategória', options: countOptions(uniq('kategoria'), items, 'kategoria') },
+    { key: 'egyeb', title: 'Egyéb', options: [['hianyzo', 'Csak a számolatlanok']] },
+  ];
 }
 
 function renderCount(root, ctx) {
@@ -286,7 +280,8 @@ function renderCount(root, ctx) {
   const parts = [];
   for (const id of ids) {
     const t0 = store.get('Tetelek', id); const polc = t0.polc || t0.raktar ? store.placeLabel(t0) : 'Polc nélkül';
-    if (polc !== lastPolc) { parts.push(html`<div class="group-title" data-group="${polc}">${polc}</div>`); lastPolc = polc; }
+    // A polccím egyben az oszlopok fejléce is (ragadós)
+    if (polc !== lastPolc) { parts.push(html`<div class="group-title" data-group="${polc}"><span>${polc}</span><span class="num">Eltérés</span><span class="num">Megszámolt</span></div>`); lastPolc = polc; }
     parts.push(rowHtml(id));
   }
   root.innerHTML = String(html`
@@ -295,12 +290,12 @@ function renderCount(root, ctx) {
     <div class="card">
       <div class="card-head sticky-search">
         <div class="toolbar head-main" style="margin:0">
-          <input type="search" id="q" placeholder="Szűrés a listában…" value="${ui.q}">
-          <label class="check small nowrap"><input type="checkbox" id="miss" ${ui.onlyMissing ? 'checked' : ''}> Csak a számolatlanok</label>
-          <div class="picker" style="flex:1 1 110px;max-width:320px"><input id="add" placeholder="+ Tétel hozzáadása" title="Tétel hozzáadása a leltárhoz" autocomplete="off"></div>
+          <input type="search" id="q" placeholder="Keresés / tétel hozzáadása…" title="Szűrés a listában; ami nincs a leltárban, a lista alján hozzáadható" value="${ui.q}">
+          ${filterButton(ui.cf)}
         </div>
       </div>
       <div class="count-list" id="list">${parts}</div>
+      <div id="offers"></div>
       <div class="bottom-bar" id="bbar">
         <div class="bb-prog"><span><b id="prog"></b> <span class="bb-done-text">– minden tétel megszámolva</span></span>
           <div class="progress"><div id="bar"></div></div></div>
@@ -322,12 +317,27 @@ function renderCount(root, ctx) {
     const groups = {};
     list.querySelectorAll('.count-row').forEach(row => {
       const t = store.get('Tetelek', row.dataset.id);
-      const show = match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) && !(ui.onlyMissing && slot.draft.counts[row.dataset.id]);
+      const show = match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) &&
+        inSel(ui.cf.wh, t.raktar) && inSel(ui.cf.polc, t.polc) && inSel(ui.cf.cat, t.kategoria) &&
+        !(ui.cf.egyeb.has('hianyzo') && slot.draft.counts[row.dataset.id]);
       row.hidden = !show;
       const g = t.polc || t.raktar ? store.placeLabel(t) : 'Polc nélkül';
       groups[g] = groups[g] || show;
     });
     list.querySelectorAll('.group-title').forEach(g => { g.hidden = !groups[g.dataset.group]; });
+    // A keresésre illő, de a leltárban nem szereplő tételek a lista alján hozzáadhatók (egy mező: szűrés + hozzáadás)
+    const offers = root.querySelector('#offers');
+    const n = addOffers(offers, ui.q, { title: 'Nincs a leltárban', exclude: new Set(slot.draft.items), onPick: addItem });
+    if (!n && !offers.innerHTML && !Object.values(groups).some(Boolean)) offers.innerHTML = '<div class="empty small">Nincs a szűrésnek megfelelő tétel.</div>';
+  };
+  // Tétel felvétele a folyamatban lévő leltárba: a helyére kerül (bejárási sorrend), és rögtön számolható
+  const addItem = t => {
+    slot.draft.items = sortItems([...slot.draft.items, t.tetel_id]);
+    Object.values(ui.cf).forEach(x => x.clear()); // a szűrő ne rejtse el az új tételt (a keresés marad)
+    save();
+    ctx.rerender();
+    const inp = root.querySelector(`.count-row[data-id="${t.tetel_id}"] input`);
+    if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
   };
   progress();
   applyFilter();
@@ -343,7 +353,7 @@ function renderCount(root, ctx) {
     else { e.target.style.borderColor = 'var(--err)'; return; }
     e.target.style.borderColor = '';
     row.classList.toggle('done', !!slot.draft.counts[id]);
-    row.querySelector('.diff').innerHTML = String(diffText(id));
+    row.querySelector('.diff').innerHTML = String(diffCell(id));
     save();
     progress();
   });
@@ -357,20 +367,10 @@ function renderCount(root, ctx) {
   });
   list.addEventListener('focusin', e => { if (e.target.tagName === 'INPUT') e.target.select(); });
   root.querySelector('#q').addEventListener('input', e => { ui.q = e.target.value; applyFilter(); });
-  root.querySelector('#miss').addEventListener('change', e => { ui.onlyMissing = e.target.checked; applyFilter(); });
-  attachPicker(root.querySelector('#add'), {
-    items: store.activeItems,
-    exclude: () => new Set(slot.draft.items),
-    onPick: t => {
-      slot.draft.items = sortItems([...draft.items, t.tetel_id]);
-      save();
-      ctx.rerender();
-      const inp = root.querySelector(`.count-row[data-id="${t.tetel_id}"] input`);
-      if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
-    },
-  });
 
   root.onclick = async e => {
+    const fb = e.target.closest('[data-filter]');
+    if (fb) return openFilter(fb, () => countGroups(ids), ui.cf, applyFilter);
     const b = e.target.closest('[data-a]');
     if (!b) return;
     if (b.dataset.a === 'discard') {

@@ -35,7 +35,11 @@ class RemoteBackend {
     }
     if (!res.ok) throw networkError('Szerverhiba (' + res.status + ').');
     let data;
-    try { data = await res.json(); } catch { throw networkError('Érvénytelen válasz a szervertől.'); }
+    try {
+      const text = await res.text();
+      data = JSON.parse(text);
+      data.bytes = text.length; // a válasz mérete (szinkron mérés, Fiók oldal)
+    } catch { throw networkError('Érvénytelen válasz a szervertől.'); }
     if (!data.ok) { const e = new Error(data.error || 'Ismeretlen hiba'); e.auth = !!data.auth; throw e; }
     return data;
   }
@@ -83,9 +87,11 @@ class DemoBackend {
   async fetchAll(token, version) {
     await this.delay();
     const user = await this.user(String(token).replace(/^demo:/, ''));
-    if (version && version === this.version) return { ok: true, user, unchanged: true, version };
-    return { ok: true, user, data: this.snapshot(user), version: this.version };
+    if (version && version === this.version) return { ok: true, user, unchanged: true, version, bytes: 60 };
+    return this.measured({ ok: true, user, data: this.snapshot(user), version: this.version });
   }
+  /** Demo: a válasz mérete, mint a valódi szervernél (a szerver lépéseinek idejét itt nem lehet mérni). */
+  measured(res) { res.bytes = JSON.stringify(res).length; return res; }
   async sync(token, ops) {
     await this.delay();
     const user = await this.user(String(token).replace(/^demo:/, ''));
@@ -97,7 +103,7 @@ class DemoBackend {
     });
     if (changed) this.version = String(Date.now());
     await this.save();
-    return { ok: true, results, user, data: this.snapshot(user), version: this.version };
+    return this.measured({ ok: true, results, user, data: this.snapshot(user), version: this.version });
   }
 }
 

@@ -32,7 +32,7 @@ const ROUTES = {
   rendelesek: { view: rendelesek, label: 'Rendelés', icon: 'cart', role: 'rendeles', group: 'beszerzes',
     badge: () => ({ n: Object.values(store.state.stock).filter(x => x.javaslat > 0).length, text: 'pótolandó tétel' }) },
   kimutatasok: { view: kimutatasok, label: 'Kimutatás', icon: 'chart', role: 'kimutatas', group: 'keszlet' },
-  mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'olvaso', group: 'keszlet' },
+  mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'mozgasok', group: 'keszlet' },
   // Raktáros is eléri, de nála csak a Leltársablonok fül látszik
   torzsadatok: { view: torzsadatok, label: 'Törzsadatok', icon: 'database', role: 'raktaros', group: 'beallitasok' },
   fiok: { view: fiok, label: 'Fiók', icon: 'user', role: 'olvaso', bottom: true },
@@ -207,12 +207,11 @@ function afterRender() {
 
 /** Kártya ragadós fejléce (.card > .sticky-search): a magassága a kártyán --head-h, hogy az alatta ragadó
  *  elemek (táblázatfejléc, leltár polccím) pontosan alá kerüljenek – akkor is, ha mobilon több sorba törik. */
+const headObserver = new ResizeObserver(entries => entries.forEach(e => fitHead(e.target)));
+const fitHead = h => h.parentElement?.style.setProperty('--head-h', h.offsetHeight + 'px');
 function measureStickyHeads() {
-  $('view').querySelectorAll('.card > .sticky-search').forEach(h => {
-    const fit = () => h.parentElement.style.setProperty('--head-h', h.offsetHeight + 'px');
-    fit();
-    new ResizeObserver(fit).observe(h);
-  });
+  headObserver.disconnect(); // az előző kirajzolás fejlécei már nincsenek az oldalon
+  $('view').querySelectorAll('.card > .sticky-search').forEach(h => { fitHead(h); headObserver.observe(h); });
 }
 
 /** A fülsávban az aktív fül látható (középre görgetve) – újrarajzolás után ne ugorjon a sáv elejére. */
@@ -300,7 +299,8 @@ applyPrefs();
 
 store.subscribe(kind => {
   renderStatus();
-  if (kind === 'status') return;
+  // 'status': csak a szinkron állapota változott – a nézetek maradnak; a Fiók oldal ezt is mutatja (gomb, mérések)
+  if (kind === 'status') { if (current && current.name === 'fiok' && store.state.user) renderView(); return; }
   if (kind === 'pref') applyPrefs();
   const s = store.state;
   if (!s.user || !current) return render();

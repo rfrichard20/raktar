@@ -1,6 +1,6 @@
 // Mozgások: minden tétel készletmozgása időrendben (leltár, beérkezés, kivét, korrekció) – mi történt a raktárban.
 import * as store from '../store.js';
-import { html, help, matcher, fmtDate, todayInput } from '../ui.js';
+import { html, help, matcher, todayInput } from '../ui.js';
 import { showItemDetail, movesTable, movesLegend, filterButton, openFilter, inSel } from './common.js';
 
 const L = window.RaktarLogic;

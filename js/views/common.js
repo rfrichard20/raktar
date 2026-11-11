@@ -18,9 +18,7 @@ export function attachPicker(input, opts) {
     const q = input.value.trim();
     const ex = opts.exclude ? opts.exclude() : new Set();
     const match = matcher(q);
-    matches = opts.items().filter(t => !ex.has(t.tetel_id) &&
-      match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id} ${L.sourcesFor(store.state.db, t.tetel_id).map(f => f.cikkszam).join(' ')}`))
-      .slice(0, 30);
+    matches = opts.items().filter(t => !ex.has(t.tetel_id) && match(itemSearchText(t))).slice(0, 30);
     close();
     if (!q && !opts.showAll) return;
     const canCreate = opts.allowCreate !== false && store.can('raktaros') && q;
@@ -57,6 +55,48 @@ export function attachPicker(input, opts) {
   });
 }
 
+/**
+ * Tétel kereshető szövege (név, kategória, raktár, polc, azonosító, cikkszámok) – tételkereső, „nincs a listán” ajánlat.
+ * Az adat változásáig megjegyzi (gépeléskor ne kelljen minden leütésnél minden tétel forrásait újra összeszedni).
+ */
+let searchDb = null, searchTexts = new Map();
+export function itemSearchText(t) {
+  if (searchDb !== store.state.db) {
+    searchDb = store.state.db;
+    const codes = {};
+    searchDb.Forrasok.forEach(f => { codes[f.tetel_id] = (codes[f.tetel_id] || '') + ' ' + f.cikkszam; });
+    searchTexts = new Map(searchDb.Tetelek.map(x => [x.tetel_id, `${x.megnevezes} ${x.kategoria} ${x.raktar || ''} ${x.polc} ${x.tetel_id}${codes[x.tetel_id] || ''}`]));
+  }
+  return searchTexts.get(t.tetel_id) || t.megnevezes;
+}
+
+/* ---------- „Nincs a listán” ajánlat (egy mező: szűrés + hozzáadás) ---------- */
+/**
+ * Listát szűrő keresőhöz: a keresésre illő, de a listában NEM szereplő tételeket felajánlja hozzáadásra,
+ * így nem kell külön „hozzáadás” mező. A lista alá tett üres elembe (host) rajzol; minden szűréskor hívandó.
+ *   addOffers(host, q, { exclude: Set(listán lévő tetel_id-k), onPick(t), title?, items?, allowCreate?, max? })
+ * Üres keresésnél nem mutat semmit. Ha a törzsadatokban sincs ilyen tétel, felajánlja az új tétel felvételét
+ * (raktárostól). Visszaad: a felajánlott tételek száma.
+ */
+export function addOffers(host, q, { exclude, onPick, title = 'Nincs a listán', items = store.activeItems, allowCreate = true, max = 5 }) {
+  q = String(q || '').trim();
+  const match = matcher(q);
+  const found = q ? items().filter(t => !exclude.has(t.tetel_id) && match(itemSearchText(t))) : [];
+  const shown = found.slice(0, max);
+  const canCreate = q && allowCreate && store.can('raktaros');
+  host.innerHTML = String(shown.length || canCreate ? html`<div class="list-sep">${title}${found.length > max ? ` – az első ${max} a ${found.length} találatból` : ''}</div>
+    ${shown.map(t => html`<div class="list-item offer-item">
+      <div class="grow"><div>${t.megnevezes}</div><div class="small muted">${t.kategoria || ''} · ${store.placeLabel(t)}</div></div>
+      <button type="button" class="btn btn-sm" data-offer="${t.tetel_id}">+ Hozzáadás</button></div>`)}
+    ${canCreate ? html`<button type="button" class="list-item offer-item offer-new" data-offer-new>+ Új tétel felvétele: „${q}”</button>` : ''}` : '');
+  host.onclick = e => {
+    const b = e.target.closest('[data-offer]');
+    if (b) return onPick(store.get('Tetelek', b.dataset.offer));
+    if (e.target.closest('[data-offer-new]')) quickAddItem(q).then(t => { if (t) onPick(t); });
+  };
+  return shown.length;
+}
+
 /* ---------- Szűrő gomb (checkboxos legördülő a kereső mellett) ---------- */
 /**
  * Listák szűrője: egy ikon gomb a kereső mellett (egy sorban), mögötte csoportonként checkboxos lista.
@@ -65,38 +105,45 @@ export function attachPicker(input, opts) {
  *   root.querySelector('[data-filter]').onclick = e => openFilter(e.currentTarget, groups, ui.f, frissítés);
  * groups(): [{ key, title, options: [[érték, felirat, darab?]] }] – az üres csoport nem jelenik meg.
  * A frissítés csak a listát rajzolja újra (a gomb a helyén marad, a darabszámot az openFilter frissíti).
+ * Más választóhoz is jó (nem szűrő gombról nyitva, pl. leltár: raktár / kategória):
+ *   opts.summary() – szöveg a lábléc elején (minden változáskor frissül, a darabszámokkal együtt); opts.onClose().
  */
 const filterCount = sel => Object.values(sel).reduce((a, s) => a + s.size, 0);
 export function filterButton(sel) {
   const n = filterCount(sel);
   return html`<button type="button" class="btn filter-btn ${n ? 'on' : ''}" data-filter title="Szűrők" aria-label="Szűrők">${ICONS.filter}${n ? html`<span class="filter-n">${n}</span>` : ''}</button>`;
 }
-export function openFilter(btn, groups, sel, onChange) {
+export function openFilter(btn, groups, sel, onChange, { summary, onClose } = {}) {
   const body = () => html`${groups().filter(g => g.options.length).map(g => html`<div class="pop-title">${g.title}</div>
     ${g.options.map(([v, l, n]) => html`<label class="pop-item"><input type="checkbox" data-g="${g.key}" value="${v}" ${sel[g.key].has(v) ? 'checked' : ''}>
       <span class="grow">${l}</span>${n != null ? html`<span class="small muted">${n}</span>` : ''}</label>`)}`)}
-    <div class="pop-foot"><button type="button" class="btn btn-sm btn-link-danger" data-x="clear">Szűrők törlése</button>
+    <div class="pop-foot">${summary ? html`<span class="small">${summary()}</span>` : ''}
+      <button type="button" class="btn btn-sm btn-link-danger" data-x="clear" ${summary ? html`style="margin-left:auto"` : ''}>${summary ? 'Törlés' : 'Szűrők törlése'}</button>
       <button type="button" class="btn btn-sm btn-primary" data-x="ok">Kész</button></div>`;
-  const changed = () => {
-    const n = filterCount(sel);
-    btn.classList.toggle('on', !!n);
-    btn.querySelector('.filter-n')?.remove();
-    if (n) btn.insertAdjacentHTML('beforeend', `<span class="filter-n">${n}</span>`);
-    onChange();
+  const changed = el => {
+    if (btn.matches('.filter-btn')) { // a szűrő gombon az aktív szűrők száma
+      const n = filterCount(sel);
+      btn.classList.toggle('on', !!n);
+      btn.querySelector('.filter-n')?.remove();
+      if (n) btn.insertAdjacentHTML('beforeend', `<span class="filter-n">${n}</span>`);
+    }
+    if (summary) el.innerHTML = String(body()); // összesítő és darabszámok frissítése
+    if (onChange) onChange();
   };
   popover(btn, body(), {
     minWidth: 260,
+    onClose,
     onMount: (el, close) => {
       el.addEventListener('change', e => {
         const s = sel[e.target.dataset.g];
         if (!s) return;
         e.target.checked ? s.add(e.target.value) : s.delete(e.target.value);
-        changed();
+        changed(el);
       });
       el.addEventListener('click', e => {
         const x = e.target.closest('[data-x]');
         if (!x) return;
-        if (x.dataset.x === 'clear') { Object.values(sel).forEach(s => s.clear()); el.innerHTML = String(body()); changed(); } else close();
+        if (x.dataset.x === 'clear') { Object.values(sel).forEach(s => s.clear()); el.innerHTML = String(body()); changed(el); } else close();
       });
     },
   });
@@ -543,7 +590,7 @@ export function showItemDetail(tetelId) {
         <td class="c-main">${l.rendeles_id}${o.belso_azon ? html` <span class="muted">· ${o.belso_azon}</span>` : ''}<div class="sub">${fmtDate(o.datum)}</div></td>
         <td class="c-act">${store.supplierName(o.beszallito_id)}</td>
         <td class="num c-f1" data-l="Rendelt">${fmtNum(l.mennyiseg)} ${me}</td><td class="num c-f2" data-l="Megérkezett">${fmtNum(l.beerkezett)}</td></tr>`; })}</tbody></table></div>` : ''}
-    <h3 class="sec-h">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40 – az összes a Mozgások oldalon)</span>
+    <h3 class="sec-h">Mozgások <span class="small muted" style="font-weight:400">(utolsó 40${store.can('mozgasok') ? ' – az összes a Mozgások oldalon' : ''})</span>
       ${help(movesLegend())}</h3>
     ${moves.length ? html`<div class="table-wrap">${movesTable(moves)}</div>` : html`<p class="muted small">Még nincs mozgás.</p>`}`;
   const dlg = modal({ title: t.megnevezes, body, actions: [{ label: 'Bezárás', value: null }], wide: true });

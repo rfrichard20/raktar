@@ -162,6 +162,8 @@ var RaktarLogic = (function () {
     arak: ['admin', 'raktaros', 'olvaso'],      // beszerzési árak, készletérték
     rendeles: ['admin', 'raktaros', 'olvaso'],  // rendelések, beszállítók, beszerzési források
     kimutatas: ['admin', 'raktaros', 'olvaso'], // kimutatások oldal
+    mozgasok: ['admin', 'raktaros', 'olvaso'],  // Mozgások oldal (összes tétel mozgása) – csak a menüpontot rejti,
+                                                // a mozgások adata mindenkinek kell a készletszámításhoz
   };
   /** Szerepkör (pl. 'raktaros') vagy jog (pl. 'arak') ellenőrzése. */
   function can(user, what) {

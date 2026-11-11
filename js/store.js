@@ -19,6 +19,9 @@ export const state = {
   online: navigator.onLine,
   lastError: null,
   authError: null,
+  // Szinkron mérés (Fiók oldal): az utolsó kérések, a legújabb elöl –
+  // { at, kind: 'feltoltes'|'letoltes'|'valtozatlan', ops, ms (teljes), bytes, server: { auth, lock, read, apply, write, total }, local }
+  syncLog: [],
   db: null,            // pillanatkép + outbox alkalmazva
   stock: {},           // számított készlet tételenként
 };
@@ -32,6 +35,7 @@ export const can = what => L.can(state.user, what);
 
 // Egy szinkron kérésben legfeljebb ennyi művelet megy fel (a szerver 200 fölött az egészet elutasítaná)
 const SYNC_BATCH = 100;
+const SYNC_LOG_MAX = 20; // ennyi szinkron mérése marad meg
 
 /** A művelet a bejelentkezett felhasználóé-e (régi, címke nélküli műveletek: igen). */
 const isMine = op => !op.by || (state.user && op.by === state.user.email);
@@ -48,8 +52,14 @@ function recompute() {
     try { L.applyOp(db, op, state.user, op.created); op.localError = null; }
     catch (e) { op.localError = e.message; }
   }
+  setDb(db);
+}
+/** A megjelenített adat beállítása + készlet újraszámolása (az esedékesség a naptól is függ: computedDay). */
+let computedDay = '';
+function setDb(db) {
   state.db = db;
   state.stock = L.computeStock(db, Date.now());
+  computedDay = new Date().toDateString();
 }
 
 async function persist() {
@@ -60,9 +70,10 @@ async function persist() {
 }
 
 export async function init() {
-  const [session, snap, outbox, rejected] = await Promise.all([
-    idb.get('session'), idb.get('snapshot'), idb.get('outbox'), idb.get('rejected'),
+  const [session, snap, outbox, rejected, syncLog] = await Promise.all([
+    idb.get('session'), idb.get('snapshot'), idb.get('outbox'), idb.get('rejected'), idb.get('syncLog'),
   ]);
+  state.syncLog = syncLog || [];
   if (session) { state.user = session.user; state.token = session.token; }
   if (snap) { state.snapshot = snap.data; state.snapshotAt = snap.at; state.version = snap.version || null; }
   state.outbox = outbox || [];
@@ -103,12 +114,13 @@ export async function enqueue(op) {
   op.op_id = L.newId('OP', 12);
   op.created = new Date().toISOString();
   op.by = state.user && state.user.email; // a rögzítő: csak az ő nevében töltődik fel
-  // Helyi ellenőrzés: ha a logika már itt elutasítja, nem kerül a sorba
-  const test = L.cloneDb(state.db);
-  L.applyOp(test, op, state.user, op.created); // hibát dob, ha érvénytelen
+  // Helyi ellenőrzés egy másolaton: ha a logika már itt elutasítja, nem kerül a sorba
+  const next = L.cloneDb(state.db);
+  L.applyOp(next, op, state.user, op.created); // hibát dob, ha érvénytelen
   state.outbox.push(op);
+  // A másolat már az új állapot (eddigi adat + ez a művelet) – nem kell mindent elölről újraszámolni
+  setDb(next);
   await persist();
-  recompute();
   emit();
   syncSoon();
   return op;
@@ -154,13 +166,20 @@ async function doSync() {
   const mine = myOutbox();
   const sent = mine.slice(0, SYNC_BATCH);
   if (mine.length > sent.length) syncAgain = true; // a többi a következő körben
+  let entry = null, received = 0; // szinkron mérés
+  let unchanged = false;          // a szerveren nem változott semmi: nincs mit újraszámolni / újrarajzolni
   try {
+    const started = performance.now();
     // Feltöltendő nélkül: csak akkor jön le az adat, ha a szerveren változott (verzió)
     const res = sent.length ? await backend.sync(state.token, sent) : await backend.fetchAll(state.token, state.snapshot ? state.version : null);
+    received = performance.now();
+    entry = { at: new Date().toISOString(), kind: sent.length ? 'feltoltes' : res.unchanged ? 'valtozatlan' : 'letoltes',
+      ops: sent.length, ms: Math.round(received - started), bytes: res.bytes || 0, server: res.timing || null };
     if (res.unchanged) {
       state.snapshotAt = new Date().toISOString();
       state.online = true; state.lastError = null; retryDelay = 15000;
       if (res.user) state.user = res.user;
+      unchanged = true;
       return;
     }
     if (sent.length) {
@@ -198,8 +217,17 @@ async function doSync() {
     else { state.lastError = e.message; }
   } finally {
     state.syncing = false;
-    recompute();
-    emit();
+    // Változatlan adatnál csak akkor számolunk újra, ha közben napot váltottunk (esedékes leltárak)
+    const stale = !unchanged || computedDay !== new Date().toDateString();
+    if (stale) recompute();
+    if (entry) {
+      // Mérés naplózása: a válasz utáni helyi feldolgozás (mentés a készülékre, készlet újraszámolása) idejével
+      entry.local = Math.round(performance.now() - received);
+      state.syncLog.unshift(entry);
+      state.syncLog.length = Math.min(state.syncLog.length, SYNC_LOG_MAX);
+      idb.set('syncLog', state.syncLog);
+    }
+    emit(stale ? 'data' : 'status'); // 'status': a nézetek nem rajzolódnak újra, csak a szinkron jelző
   }
 }
 

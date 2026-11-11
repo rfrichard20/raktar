@@ -193,15 +193,10 @@ export function formValues(root) {
   return out;
 }
 
+/** Szöveg a vágólapra (a böngésző beépített vágólapkezelőjével; az app mindig biztonságos kapcsolaton fut). */
 export function copyText(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    return navigator.clipboard.writeText(text).then(() => toast('Vágólapra másolva', 'ok'));
-  }
-  const ta = document.createElement('textarea');
-  ta.value = text; document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); toast('Vágólapra másolva', 'ok'); } catch { toast('A másolás nem sikerült', 'error'); }
-  ta.remove();
-  return Promise.resolve();
+  return navigator.clipboard.writeText(text)
+    .then(() => toast('Vágólapra másolva', 'ok'), () => toast('A másolás nem sikerült', 'error'));
 }
 
 /* ---------- Legördülő panel (popover) ---------- */

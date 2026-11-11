@@ -1,6 +1,6 @@
 // Fiók és szinkron állapot.
 import * as store from '../store.js';
-import { html, fmtDate, confirmDialog, toast } from '../ui.js';
+import { html, fmtDate, fmtNum, confirmDialog, toast, help, copyText } from '../ui.js';
 
 import { navRoutes } from '../app.js';
 import { ICONS } from '../icons.js';
@@ -26,6 +26,38 @@ const OP_LABEL = {
   sablon_torles: () => 'Leltár sablon törlése',
 };
 const opLabel = op => (OP_LABEL[op.type] ? OP_LABEL[op.type](op) : op.type);
+
+/* ---------- Szinkron mérés: hol megy el az idő ---------- */
+const SYNC_KIND = { feltoltes: 'Feltöltés', letoltes: 'Letöltés', valtozatlan: 'Nincs változás' };
+const secs = ms => (ms == null ? '–' : fmtNum(Math.round(ms / 10) / 100) + ' mp');
+const kb = b => (!b ? '–' : b < 1024 ? '< 1 kB' : fmtNum(Math.round(b / 1024)) + ' kB');
+// [fejléc, érték] – a „Hálózat + indulás” a teljes időből a szerver munkáján kívüli rész (adatút, a szerver elindulása)
+const SYNC_COLS = [
+  ['Típus', e => SYNC_KIND[e.kind] + (e.ops ? ` (${e.ops} művelet)` : '')],
+  ['Teljes', e => secs(e.ms)],
+  ['Szerver', e => secs(e.server?.total)],
+  ['Olvasás', e => secs(e.server?.read)],
+  ['Írás', e => secs(e.server?.write)],
+  ['Hálózat + indulás', e => (e.server ? secs(e.ms - e.server.total) : '–')],
+  ['Készülék', e => secs(e.local)],
+  ['Adat', e => kb(e.bytes)],
+];
+function syncLogHtml() {
+  const log = store.state.syncLog;
+  if (!log.length) return '';
+  const avg = k => { const l = log.filter(e => e.kind === k); return l.length ? `${SYNC_KIND[k].toLowerCase()}: ${secs(l.reduce((a, e) => a + e.ms, 0) / l.length)} (${l.length} db)` : ''; };
+  return html`<div class="card">
+    <div class="card-head"><h2>Szinkron mérés</h2>${help(html`Az utolsó ${log.length} szinkron ideje, a legújabb elöl – ebből látszik, mit érdemes gyorsítani.<br><br>
+      <b>Teljes:</b> a kéréstől a válaszig eltelt idő. <b>Szerver:</b> ebből a szerver tényleges munkája; ezen belül az <b>Olvasás</b> (a táblázat beolvasása) és az <b>Írás</b> (mentés a táblázatba).
+      <b>Hálózat + indulás:</b> az adat útja és a szerver elindulása – ezen nem lehet gyorsítani. <b>Készülék:</b> a válasz utáni helyi mentés és készletszámítás. <b>Adat:</b> a letöltött válasz mérete.`)}
+      <span class="grow"></span><button class="btn btn-sm" data-a="copylog" title="Táblázatként a vágólapra">Másolás</button></div>
+    <p class="small muted card-note">Átlag – ${Object.keys(SYNC_KIND).map(avg).filter(Boolean).join(' · ')}</p>
+    <div class="table-wrap"><table class="tbl small cards nochk flow">
+      <thead><tr><th>Időpont</th>${SYNC_COLS.map(([l], i) => html`<th class="${i ? 'num' : ''}">${l}</th>`)}</tr></thead>
+      <tbody>${log.map(e => html`<tr><td class="c-main nowrap">${fmtDate(e.at, true)}</td>${SYNC_COLS.map(([l, v], i) => html`<td class="${i ? 'num' : ''}" data-l="${l}">${v(e)}</td>`)}</tr>`)}</tbody>
+    </table></div>
+  </div>`;
+}
 
 export default {
   render(root, params, ctx) {
@@ -94,6 +126,8 @@ export default {
           </div>`)}
       </div>` : ''}
 
+      ${syncLogHtml()}
+
       ${demo ? html`<div class="card card-pad">
         <h2>Demo beállítások</h2>
         <p class="small muted">Demo módban az adatok csak ebben a böngészőben vannak. Az offline működést itt kipróbálhatod.</p>
@@ -109,6 +143,10 @@ export default {
       if (!b || b.type === 'checkbox') return;
       const a = b.dataset.a;
       if (a === 'sync') store.sync();
+      if (a === 'copylog') {
+        copyText([['Időpont', ...SYNC_COLS.map(c => c[0])].join('\t'),
+          ...s.syncLog.map(x => [fmtDate(x.at, true), ...SYNC_COLS.map(c => c[1](x))].join('\t'))].join('\n'));
+      }
       if (a === 'navup' || a === 'navdown') {
         if (b.disabled) return;
         const keys = navRoutes().map(r => r.key);
