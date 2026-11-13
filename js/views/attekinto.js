@@ -1,7 +1,10 @@
-// Áttekintő: készlet táblázat szűrőkkel.
+// Anyagkészlet (korábban: Áttekintő): a fogyóanyagok készlete szűrőkkel. (Az eszközkészlet az Eszközök oldalon van.)
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, fmtMoney, norm, help, matcher, sortArrow, STATUS_TEXT } from '../ui.js';
 import { showItemDetail, filterButton, openFilter, inSel, countOptions } from './common.js';
+import { openLabels } from './cimkek.js';
+import { openTool } from './eszkozok.js';
+import { ICONS } from '../icons.js';
 
 const ui = { q: '', f: { cat: new Set(), wh: new Set() }, filter: '', sort: 'polc', dir: 1 };
 
@@ -35,8 +38,9 @@ function rows() {
   const stock = store.state.stock;
   const match = matcher(ui.q);
   const f = FILTERS[ui.filter][1];
-  return store.activeItems()
+  return store.materials()
     .filter(t => inSel(ui.f.cat, t.kategoria) && inSel(ui.f.wh, t.raktar))
+    .filter(t => !ui.place || ((t.raktar || '') === ui.place.r && (t.polc || '') === ui.place.p))
     .filter(t => match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
     .filter(t => f(t, stock[t.tetel_id]))
     .sort((a, b) => {
@@ -47,7 +51,7 @@ function rows() {
 
 /** Szűrő csoportok (kategória; raktár, ha több van) a darabszámmal. */
 function groups() {
-  const items = store.activeItems();
+  const items = store.materials();
   const whs = store.warehouses();
   return [
     { key: 'cat', title: 'Kategória', options: countOptions(store.categories(), items, 'kategoria') },
@@ -56,7 +60,7 @@ function groups() {
 }
 
 function statsHtml() {
-  const items = store.activeItems();
+  const items = store.materials();
   const st = store.state.stock;
   const c = k => items.filter(t => FILTERS[k][1](t, st[t.tetel_id])).length;
   const box = (k, v, l, cls) => html`<button class="stat ${cls} ${ui.filter === k ? 'sel' : ''}" data-stat="${k}"><div class="v">${v}</div><div class="l">${l}</div></button>`;
@@ -67,6 +71,18 @@ function statsHtml() {
     ${box('rendelendo', c('rendelendo'), 'Rendelendő', 'warn')}
     ${box('uton', c('uton'), 'Úton lévő', 'info')}
     ${box('esedekes', c('esedekes'), 'Esedékes leltár', '')}`;
+}
+
+/** Hely szűrésnél (polccímke): az ezen a helyen tárolt eszközök is (kattintásra az adatlapjuk). */
+function placeToolsHtml() {
+  if (!ui.place) return '';
+  const st = store.L.toolStates(store.state.db);
+  const list = (store.state.db.Eszkozok || []).filter(e => e.allapot !== 'selejtezve' && (e.raktar || '') === ui.place.r && (e.polc || '') === ui.place.p)
+    .sort((a, b) => a.azonosito.localeCompare(b.azonosito, 'hu', { numeric: true }));
+  if (!list.length) return '';
+  return html`<div class="place-tools"><div class="small muted">${ICONS.tool} Eszközök ezen a helyen (${list.length})</div>
+    ${list.map(e => html`<button class="chip" data-tool="${e.azonosito}" title="${st[e.eszkoz_id].hely === 'raktar' ? 'Bent van' : 'Most nincs a helyén (kiadva / szervizben)'}">
+      <b>${e.azonosito}</b> ${e.megnevezes}${st[e.eszkoz_id].hely !== 'raktar' ? html` <span class="t-warn">· ${st[e.eszkoz_id].hely === 'kiadva' ? 'kiadva' : 'szervizben'}</span>` : ''}</button>`)}</div>`;
 }
 
 function bodyHtml(list) {
@@ -89,6 +105,7 @@ function bodyHtml(list) {
 function update(root) {
   const list = rows();
   root.querySelector('#stats').innerHTML = String(statsHtml());
+  root.querySelector('#ptools').innerHTML = String(placeToolsHtml());
   root.querySelector('#tbody').innerHTML = String(bodyHtml(list));
   const value = !store.can('arak') ? 0 : list.reduce((a, t) => a + (store.state.stock[t.tetel_id].ertek || 0), 0);
   root.querySelector('#count').innerHTML = `${list.length} tétel` + (value ? ` · <span title="Aktuális készlet × elsődleges beszerzési ár">készletérték: <b>${fmtMoney(value)}</b></span>` : '');
@@ -97,19 +114,25 @@ function update(root) {
   });
 }
 
+/** Egy hely (raktár + polc) tételei az Áttekintőben – pl. polccímke beolvasása után. */
+export function setPlaceFilter(r, p) { ui.place = { r: r || '', p: p || '' }; ui.q = ''; ui.filter = ''; }
+
 export default {
-  render(root) {
+  render(root, params, ctx) {
     // Már kirajzolva: csak az adatokat frissítjük (a kereső fókusza megmarad)
     if (root.dataset.view === 'attekinto' && root.querySelector('#tbody')) return update(root);
     root.dataset.view = 'attekinto';
     root.innerHTML = String(html`
-      <div class="page-head"><h1>Készlet áttekintő</h1>${help(html`<b>Jelölések</b><br><span class="legend-bar st-hiany"></span> piros csík: hiány – a készlet a minimum alatt<br><span class="legend-bar st-figyelem"></span> sárga csík: fogyóban – közel a minimumhoz<br><span class="due-dot"></span> esedékes leltár (lejárt a leltári ciklus)<br><br>A felső számlálókra kattintva szűrhetsz; a sorra kattintva megnyílik a tétel adatlapja.`)}</div>
+      <div class="page-head"><h1>Anyagkészlet</h1>${help(html`<b>Jelölések</b><br><span class="legend-bar st-hiany"></span> piros csík: hiány – a készlet a minimum alatt<br><span class="legend-bar st-figyelem"></span> sárga csík: fogyóban – közel a minimumhoz<br><span class="due-dot"></span> esedékes leltár (lejárt a leltári ciklus)<br><br>A felső számlálókra kattintva szűrhetsz; a sorra kattintva megnyílik a tétel adatlapja.`)}
+        ${store.can('raktaros') ? html`<div class="actions"><button class="btn" data-a="labels" title="QR-címkék nyomtatása tételekre, polcokra, eszközökre">${ICONS.scan} Címkék</button></div>` : ''}</div>
       <div class="stats" id="stats"></div>
       <div class="card">
         <div class="toolbar card-toolbar">
           <input type="search" id="q" placeholder="Keresés név, hely, kategória szerint…" value="${ui.q}">
           ${filterButton(ui.f)}
+          ${ui.place ? html`<button class="chip on" data-a="noplace" title="Hely szűrő törlése">Hely: ${[ui.place.r, ui.place.p].filter(Boolean).join(' · ')} ✕</button>` : ''}
         </div>
+        <div id="ptools"></div>
         <div class="tbl-foot" id="count"></div>
         <div class="table-wrap">
           <table class="tbl cards fixed overview nochk">
@@ -124,6 +147,10 @@ export default {
     root.querySelector('#q').addEventListener('input', e => { ui.q = e.target.value; update(root); });
     root.onclick = e => {
       if (e.target.closest('[data-filter]')) return openFilter(e.target.closest('[data-filter]'), groups, ui.f, () => update(root));
+      if (e.target.closest('[data-a="labels"]')) return openLabels('tetel');
+      const pt = e.target.closest('[data-tool]');
+      if (pt) return openTool(pt.dataset.tool);
+      if (e.target.closest('[data-a="noplace"]')) { ui.place = null; delete root.dataset.view; return this.render(root, params, ctx); }
       const st = e.target.closest('[data-stat]');
       if (st) { ui.filter = ui.filter === st.dataset.stat ? '' : st.dataset.stat; return update(root); }
       const th = e.target.closest('th[data-sort]');

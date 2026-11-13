@@ -26,6 +26,10 @@ export const ICONS = {
   in: svg('<path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M12 3v12m-4-4 4 4 4-4"/>'),
   adjust: svg('<path d="M12 4v8M8 8h8M8 19h8"/>'), // ± – korrekció
   moves: svg('<path d="M7 20V4M3.5 7.5 7 4l3.5 3.5M17 4v16m-3.5-3.5L17 20l3.5-3.5"/>'), // mozgások (be / ki)
+  note: svg('<path d="M4 5h16v11H9l-5 4z"/>'), // megjegyzés (buborék)
+  scan: svg('<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 8h3v3H8zM13 13h3v3h-3zM13 8h3M8 16h3"/>'), // QR-beolvasás
+  tool: svg('<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3z"/><path d="M14.5 6.5 17 4l3 3-2.5 2.5"/>'), // szerszám (csavarkulcs)
+  request: svg('<path d="M4 5h16v11H9l-5 4z"/><path d="M12 7.5v6M9 10.5h6"/>'), // igény (buborék pluszjellel)
   filter: svg('<path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/>'),
   more: svg('<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>'),
   up: svg('<path d="m6 15 6-6 6 6"/>'),

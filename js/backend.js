@@ -47,6 +47,8 @@ class RemoteBackend {
   /** Teljes adat; ha a megadott verzió még aktuális, csak { unchanged: true } jön vissza (gyors). */
   fetchAll(token, version) { return this.call({ action: 'adatok', token, version }); }
   sync(token, ops) { return this.call({ action: 'szinkron', token, ops }); }
+  /** Egy átadás aláírásai (nem részei a teljes adatnak). */
+  signatures(token, bizonylat) { return this.call({ action: 'alairas', token, bizonylat }); }
 }
 
 /* ===================== Demo ===================== */
@@ -57,10 +59,18 @@ class DemoBackend {
     if (this.db) return this.db;
     let data = await idb.get('demo:db');
     if (!data) { data = L.generateDemoData(Date.now()); await idb.set('demo:db', data); }
+    // Korábbi demóadat: a külön eszköznapló átvezetése a közös mozgásnaplóba (mint a szerveren: migrateToolEvents)
+    if (data.Eszkoz_esemenyek) {
+      const tools = Object.fromEntries((data.Eszkozok || []).map(e => [e.eszkoz_id, e.tetel_id]));
+      data.Eszkoz_esemenyek.forEach(r => data.Mozgasok.push({ mozgas_id: r.esemeny_id, datum: r.datum, tipus: r.tipus, tetel_id: tools[r.eszkoz_id] || '',
+        mennyiseg: 0, bizonylat: r.bizonylat, rendeles_sor_id: '', felhasznalo: r.felhasznalo, rogzitve: r.rogzitve, megjegyzes: r.megjegyzes,
+        atvevo: r.kinel, munka: '', eszkoz_id: r.eszkoz_id, allapot: r.allapot }));
+      delete data.Eszkoz_esemenyek;
+    }
     this.db = data;
     return data;
   }
-  async save() { await idb.set('demo:db', L.exportDb(this.db)); }
+  async save() { await idb.set('demo:db', L.exportDb(this.db, L.TABLES.concat(L.SIDE_TABLES))); }
   async reset() { this.db = L.generateDemoData(Date.now(), Math.floor(Math.random() * 1e9)); this.version = String(Date.now()); await this.save(); }
   get offline() { try { return localStorage.getItem('raktar:demoOffline') === '1'; } catch { return false; } }
   set offline(v) { try { localStorage.setItem('raktar:demoOffline', v ? '1' : '0'); } catch { /* */ } }
@@ -97,13 +107,37 @@ class DemoBackend {
     const user = await this.user(String(token).replace(/^demo:/, ''));
     const now = new Date().toISOString();
     let changed = 0;
-    const results = ops.map(op => {
-      try { changed += L.applyOp(this.db, op, user, now).length; return { op_id: op.op_id, ok: true }; }
-      catch (e) { if (!e.validation) console.error(e); return { op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba (hibás szerkezetű művelet).' }; }
-    });
+    const results = [];
+    for (const op of ops) {
+      try {
+        const ch = L.applyOp(this.db, op, user, now);
+        changed += ch.length;
+        // Aláírás lenyomata, mint a szerveren (Code.gs → sealSignatures)
+        for (const c of ch) if (c.table === 'Alairasok' && !c.deleted) c.row.pecset = await this.sealOf(c.row, 'v2');
+        results.push({ op_id: op.op_id, ok: true });
+      } catch (e) {
+        if (!e.validation) console.error(e);
+        results.push({ op_id: op && op.op_id, ok: false, error: e.validation ? e.message : 'Feldolgozási hiba (hibás szerkezetű művelet).' });
+      }
+    }
     if (changed) this.version = String(Date.now());
     await this.save();
     return this.measured({ ok: true, results, user, data: this.snapshot(user), version: this.version });
+  }
+  async signatures(token, bizonylat) {
+    await this.delay();
+    const user = await this.user(String(token).replace(/^demo:/, ''));
+    const rows = (this.db.Alairasok || []).filter(s => s.bizonylat === bizonylat).map(s => ({ ...s }));
+    for (const s of rows) s.hiteles = s.pecset ? (await this.sealOf(s, L.sealVersion(s.pecset))) === s.pecset : null;
+    return { ok: true, alairasok: L.signaturesFor(this.db, rows, user, bizonylat) };
+  }
+  /** Demo: HMAC-SHA256 lenyomat egy rögzített demókulccsal (élesben a szerver titkos kulcsával), mint a Code.gs sealOf. */
+  async sealOf(sig, ver) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode('raktar-demo-pecset'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const buf = await crypto.subtle.sign('HMAC', key, enc.encode(L.sealPayload(sig, this.db.Mozgasok, ver)));
+    const h = btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_');
+    return ver === 'v2' ? 'v2.' + h : h;
   }
 }
 

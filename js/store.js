@@ -280,9 +280,16 @@ export function draftSlot(key, init = d => d || null) {
     ready(root, ctx) {
       if (slot.draft !== undefined) return true;
       root.innerHTML = '<p class="muted">Betöltés…</p>';
-      loading = loading || drafts.get(key).then(d => { slot.draft = init(d); });
-      loading.then(() => ctx.rerender());
+      slot.load().then(() => ctx.rerender());
       return false;
+    },
+    /** A vázlat betöltése oldalon kívülről (pl. másik oldal tesz bele valamit): Promise<vázlat>. */
+    async load() {
+      if (slot.draft === undefined) {
+        loading = loading || drafts.get(key).then(d => { slot.draft = init(d); });
+        await loading;
+      }
+      return slot.draft;
     },
     /** Rögzítés dupla koppintás ellen: amíg az előző fut, újat nem indít. */
     async once(fn) {
@@ -300,6 +307,10 @@ export const get = (table, id) => L.get(state.db, table, id);
 export const itemOrStub = id => get('Tetelek', id) || { tetel_id: id, megnevezes: id, mertekegyseg: '' };
 export const items = () => state.db.Tetelek;
 export const activeItems = () => state.db.Tetelek.filter(t => t.aktiv);
+/** Aktív anyagok (mennyiségben követett tételek) – Anyagkészlet, leltár, kivét, kimutatás. */
+export const materials = () => state.db.Tetelek.filter(t => t.aktiv && !L.isToolItem(t));
+/** Aktív eszköztípusok (a darabjaik az Eszközök oldalon). */
+export const toolTypes = () => state.db.Tetelek.filter(t => t.aktiv && L.isToolItem(t));
 export const supplierName = id => (get('Beszallitok', id) || {}).nev || '—';
 /** Rendelés kereshető szövege (beszállító, rendelésszám, belső azonosító, megjegyzés). */
 /** Nyitott vagy részben teljesült rendelések állapotadatokkal ({ o, info }), a legújabb elöl. */
@@ -311,6 +322,22 @@ export const userName = email => {
   const u = (state.db.Felhasznalok || []).find(x => x.email === email);
   return u ? u.nev || email : email || '—';
 };
+/**
+ * Szabad szöveges személy (átvevő, kinek adtuk ki) tárolandó értéke: ha egy felhasználó nevét vagy e-mail-címét
+ * adták meg, az e-mail-cím (névváltozás után is azonosítható), egyébként a beírt szöveg (pl. külsős).
+ */
+export const personKey = text => {
+  const t = String(text || '').trim(), lower = t.toLowerCase();
+  const u = (state.db.Felhasznalok || []).find(x => String(x.nev || '').toLowerCase() === lower || x.email === lower);
+  return u ? u.email : t;
+};
+/** A felhasználók nevei ábécérendben (személyválasztó javaslatlistához). */
+export const userNames = () => (state.db.Felhasznalok || []).map(u => u.nev || u.email).sort((a, b) => a.localeCompare(b, 'hu'));
+/** Egy átadás aláírásai a szerverről (csak online; a teljes adattal nem jönnek le). */
+export async function signatures(bizonylat) {
+  const res = await backend.signatures(state.token, bizonylat);
+  return res.alairasok || [];
+}
 export const warehouses = () => [...new Set(state.db.Tetelek.filter(t => t.aktiv).map(t => t.raktar || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
 /** Egy mező eddigi értékei, a legutóbb használt elöl (javaslatlistához: suggestInput). */
 export const recentValues = (rows, field, dateField) => [...new Set((rows || []).slice()

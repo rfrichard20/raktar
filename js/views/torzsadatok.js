@@ -8,7 +8,7 @@ const L = window.RaktarLogic;
 const ui = {
   tab: 'tetelek', q: '',
   // Szűrők (filterButton): üres = mind; „egyeb” → 'inaktiv': az inaktívak is látszanak
-  f: { kat: new Set(), wh: new Set(), sup: new Set(), mod: new Set(), role: new Set(), egyeb: new Set() },
+  f: { kat: new Set(), wh: new Set(), sup: new Set(), mod: new Set(), role: new Set(), egyeb: new Set(), kesz: new Set() },
   sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1], emailek: ['nev', 1] },
 };
 
@@ -28,9 +28,10 @@ const numVal = (isNew, v) => (isNew ? '' : String(v ?? ''));
 
 /* ---------- Tétel szerkesztő (a tétel adatlapjáról is nyílik) ---------- */
 /** Tétel szerkesztése / új tétel. Visszaad: Promise, amely az ablak bezárásakor teljesül. */
-export function editItem(t) {
+export function editItem(t, pre = {}) {
   const isNew = !t;
-  t = t || { tetel_id: L.newId('T', 6), megnevezes: '', kategoria: '', mertekegyseg: '', raktar: '', polc: '', min_keszlet: 0, cel_keszlet: 0, leltar_ciklus_nap: 90, aktiv: true, megjegyzes: '' };
+  t = t || { tetel_id: L.newId('T', 6), megnevezes: '', kategoria: '', mertekegyseg: '', raktar: '', polc: '', min_keszlet: 0, cel_keszlet: 0, leltar_ciklus_nap: 90, aktiv: true, megjegyzes: '', keszletezes: '', ...pre };
+  const tool = L.isToolItem(t);
   const db = store.state.db;
   const orig = L.sourcesFor(db, t.tetel_id);
   const sups = db.Beszallitok.filter(b => b.aktiv || orig.some(f => f.beszallito_id === b.beszallito_id)).sort((a, b) => a.nev.localeCompare(b.nev, 'hu'));
@@ -48,6 +49,8 @@ export function editItem(t) {
     body: html`<div data-main>
       ${sec('Alapadatok', html`
         <label class="field span-2"><span>Megnevezés *</span><input name="megnevezes" value="${t.megnevezes}"></label>
+        <label class="field span-2"><span>Készletezés ${help(html`<b>Anyag:</b> mennyiségben követett, fogyó tétel (csavar, szilikon, kábel) – Anyagkészlet, leltár, kivét.<br><br><b>Eszköz:</b> eszköztípus (pl. „Akkus fúró-csavarozó 18 V”), amelynek egyedi darabjait az Eszközök oldalon tartjuk nyilván (azonosító, gyári szám, kinél van). A készlete a darabok száma; a minimum / cél a rendelési javaslathoz kell.`)}</span>
+          <select name="keszletezes"><option value="" ${tool ? '' : 'selected'}>Anyag (mennyiségben)</option><option value="eszkoz" ${tool ? 'selected' : ''}>Eszköz (egyedi darabok)</option></select></label>
         <label class="field"><span>Kategória</span>${listSelect('kategoria', 'kategoria', t.kategoria)}</label>
         <label class="field"><span>Mértékegység</span>${listSelect('mertekegyseg', 'mertekegyseg', t.mertekegyseg, { defaultFirst: isNew })}</label>`)}
       ${sec('Tárolás', html`
@@ -56,7 +59,7 @@ export function editItem(t) {
       ${sec('Készletszint és leltár', html`
         <label class="field"><span>Minimum készlet</span><input name="min_keszlet" inputmode="decimal" value="${numVal(isNew, t.min_keszlet)}" placeholder="0"></label>
         <label class="field"><span>Célkészlet (eddig pótolunk)</span><input name="cel_keszlet" inputmode="decimal" value="${numVal(isNew, t.cel_keszlet)}" placeholder="0"></label>
-        <label class="field"><span>Leltár gyakoriság</span><select name="leltar_ciklus_nap">${CYCLES.map(([v, l]) => html`<option value="${v}" ${Number(t.leltar_ciklus_nap) === v ? 'selected' : ''}>${l}</option>`)}
+        <label class="field" data-leltar ${tool ? 'hidden' : ''}><span>Leltár gyakoriság</span><select name="leltar_ciklus_nap">${CYCLES.map(([v, l]) => html`<option value="${v}" ${Number(t.leltar_ciklus_nap) === v ? 'selected' : ''}>${l}</option>`)}
           ${CYCLES.some(c => c[0] === Number(t.leltar_ciklus_nap)) ? '' : html`<option value="${t.leltar_ciklus_nap}" selected>${t.leltar_ciklus_nap} nap</option>`}</select></label>`)}
       ${sec('Egyéb', html`
         <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" value="${t.megjegyzes}"></label>
@@ -70,8 +73,12 @@ export function editItem(t) {
     actions: [{ label: 'Mégse', value: null }, {
       label: 'Mentés', kind: 'primary', onClick: async el => {
         const v = formValues(el.querySelector('[data-main]'));
+        const toTool = v.keszletezes === 'eszkoz';
         const row = { ...t, ...v, mertekegyseg: v.mertekegyseg || 'db', raktar: v.raktar || (isNew ? store.warehouses()[0] || '' : ''),
-          min_keszlet: parseNum(v.min_keszlet) || 0, cel_keszlet: parseNum(v.cel_keszlet) || 0, leltar_ciklus_nap: Number(v.leltar_ciklus_nap) || 0 };
+          min_keszlet: parseNum(v.min_keszlet) || 0, cel_keszlet: parseNum(v.cel_keszlet) || 0, leltar_ciklus_nap: toTool ? 0 : Number(v.leltar_ciklus_nap) || 0 };
+        // Anyagból eszköztípus: a mozgásokból számolt készlet helyett a darabok száma számít
+        if (!isNew && toTool && !tool && db.Mozgasok.some(x => x.tetel_id === t.tetel_id) &&
+          !(await confirmDialog('Eszköztípussá alakítás', 'Ennek a tételnek vannak készletmozgásai. Eszköztípusként a készlete a hozzá rögzített egyedi eszközök száma lesz (a mozgások megmaradnak, de nem számítanak). Folytatod?', 'Átalakítás'))) return false;
         const prim = el.querySelector('input[name=prim]:checked')?.value;
         const rows = [...el.querySelectorAll('#src tbody tr')];
         const ops = [{ type: 'mentes', table: 'Tetelek', row }];
@@ -95,6 +102,8 @@ export function editItem(t) {
     }],
   });
   bindListSelects(m.el.querySelector('[data-main]'));
+  // Eszköztípusnál nincs leltári ciklus (a darabokat az Eszközök oldal követi)
+  m.el.querySelector('[name=keszletezes]').addEventListener('change', e => { m.el.querySelector('[data-leltar]').hidden = e.target.value === 'eszkoz'; });
   const tbody = m.el.querySelector('#src tbody');
   m.el.querySelector('[data-addsrc]').onclick = () => {
     const tmp = document.createElement('tbody');
@@ -223,7 +232,7 @@ function columns(db) {
   const srcCount = id => L.sourcesFor(db, id).length;
   return {
     tetelek: [
-      ['megnevezes', 'Megnevezés', t => t.megnevezes, t => html`${t.megnevezes}<div class="sub">${t.tetel_id}</div>`, 'main'],
+      ['megnevezes', 'Megnevezés', t => t.megnevezes, t => html`${t.megnevezes}${L.isToolItem(t) ? html` <span class="badge badge-info" title="Eszköztípus – a darabjai az Eszközök oldalon">eszköz</span>` : ''}<div class="sub">${t.tetel_id}</div>`, 'main'],
       ['kategoria', 'Kategória', t => t.kategoria, t => t.kategoria],
       ['hely', 'Hely', t => `${t.raktar || ''} ${t.polc || ''}`, t => store.placeLabel(t)],
       ['me', 'Me.', t => t.mertekegyseg, t => t.mertekegyseg, 'm-hide'],
@@ -270,7 +279,7 @@ function filtered(db) {
   const inactive = f.egyeb.has('inaktiv');
   if (ui.tab === 'tetelek') {
     return db.Tetelek.filter(t => (inactive || t.aktiv) && match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
-      .filter(t => inSel(f.kat, t.kategoria) && inSel(f.wh, t.raktar))
+      .filter(t => inSel(f.kat, t.kategoria) && inSel(f.wh, t.raktar) && inSel(f.kesz, L.isToolItem(t) ? 'eszkoz' : 'anyag'))
       .filter(t => {
         if (!f.sup.size) return true;
         const src = L.sourcesFor(db, t.tetel_id);
@@ -308,7 +317,9 @@ function filterGroups() {
   const other = { key: 'egyeb', title: 'Egyéb', options: [['inaktiv', 'Inaktívak is']] };
   if (ui.tab === 'tetelek') {
     const whs = store.warehouses();
+    const tools = db.Tetelek.filter(t => L.isToolItem(t)).length;
     return [
+      { key: 'kesz', title: 'Készletezés', options: [['anyag', 'Anyag', db.Tetelek.length - tools], ['eszkoz', 'Eszköztípus', tools]] },
       { key: 'kat', title: 'Kategória', options: countOptions(store.categories(), db.Tetelek, 'kategoria') },
       { key: 'wh', title: 'Raktár', options: whs.length > 1 ? countOptions(whs, db.Tetelek, 'raktar') : [] },
       { key: 'sup', title: 'Beszállító', options: [['-', '— forrás nélkül —'], ...db.Beszallitok.slice().sort((a, b) => a.nev.localeCompare(b.nev, 'hu')).map(b => [b.beszallito_id, b.nev])] },

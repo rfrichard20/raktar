@@ -3,6 +3,7 @@ import * as store from '../store.js';
 import { html, fmtNum, fmtDate, parseNum, confirmDialog, toast, todayInput, dateInputToIso, help, matcher, compare, sortArrow, ORDER_STATUS } from '../ui.js';
 import { attachPicker, enterBackHtml, bindEnterBack, filterButton, openFilter, inSel } from './common.js';
 import { ICONS } from '../icons.js';
+import { addUnitsAfterReceipt } from './eszkozok.js';
 
 const L = window.RaktarLogic;
 // Vázlat: rendelés alapján { mode: 'rendeles', rendeles_id, lines: { sor_id: { on, q } }, … }
@@ -174,6 +175,7 @@ function renderOrder(root, ctx) {
             await store.enqueue({ type: 'mozgasok', rows });
             // A beérkezés rögzítve: a vázlat azonnal törlődik, hogy egy újabb „Rögzítés” ne vigye fel kétszer
             await slot.clear();
+            setTimeout(() => addUnitsAfterReceipt(rows), 0); // eszköztípusnál: egyedi darabok felvétele
           }
           if (lezar) {
             try { await store.enqueue({ type: 'rendeles_lezaras', rendeles_id: o.rendeles_id }); }
@@ -257,6 +259,7 @@ function renderFree(root, ctx) {
           await slot.clear();
           toast('Beérkezés rögzítve', 'ok');
           ctx.rerender();
+          addUnitsAfterReceipt(rows); // eszköztípusnál: egyedi darabok felvétele
         } catch (x) { toast(x.message, 'error', 6000); }
       });
     }

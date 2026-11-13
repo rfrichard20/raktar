@@ -1,12 +1,16 @@
-// Mozgások: minden tétel készletmozgása időrendben (leltár, beérkezés, kivét, korrekció) – mi történt a raktárban.
+// Mozgások: a közös mozgásnapló időrendben – anyag (leltár, beérkezés, kivét, korrekció) és eszköz (kiadás, visszavétel,
+// szerviz, felülvizsgálat…) egy idővonalon: mi történt a raktárban.
 import * as store from '../store.js';
 import { html, help, matcher, todayInput } from '../ui.js';
 import { showItemDetail, movesTable, movesLegend, filterButton, openFilter, inSel } from './common.js';
+import { openTool } from './eszkozok.js';
 
 const L = window.RaktarLogic;
 const PERIODS = [['1', 'Ma'], ['7', '7 nap'], ['30', '30 nap'], ['egyeni', 'Egyéni']];
 const LIMIT = 200;
-const ui = { period: '1', tol: '', ig: '', q: '', all: false, f: { tipus: new Set(), ki: new Set(), wh: new Set() } };
+const ui = { period: '1', tol: '', ig: '', q: '', all: false, f: { fajta: new Set(), tipus: new Set(), ki: new Set(), wh: new Set() } };
+/** A közös napló egy sora: anyag- vagy eszközmozgás; a hely- és keresőszöveghez az eszköz / tétel adatai. */
+const subject = m => (m.eszkoz_id ? store.get('Eszkozok', m.eszkoz_id) || {} : store.itemOrStub(m.tetel_id));
 
 /** Helyi naptári nap kezdete (ms) egy ÉÉÉÉ-HH-NN értékből, eltolással napokban. */
 const dayStart = (ymd, plusDays = 0) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d + plusDays).getTime(); };
@@ -26,9 +30,9 @@ function filtered() {
     // A visszamenőleg rögzített mozgás a rögzítés napján is látszik (a dátuma szerinti napon is)
     .filter(m => inRange(m.datum) || (m.rogzitve && inRange(m.rogzitve)))
     .filter(m => {
-      const t = store.itemOrStub(m.tetel_id);
-      return inSel(ui.f.tipus, m.tipus) && inSel(ui.f.ki, m.felhasznalo) && inSel(ui.f.wh, t.raktar) &&
-        match(`${t.megnevezes} ${t.raktar || ''} ${t.polc || ''} ${m.bizonylat} ${m.atvevo ? store.userName(m.atvevo) : ''} ${m.munka || ''} ${m.megjegyzes || ''}`);
+      const t = subject(m);
+      return inSel(ui.f.fajta, m.eszkoz_id ? 'eszkoz' : 'anyag') && inSel(ui.f.tipus, m.tipus) && inSel(ui.f.ki, m.felhasznalo) && inSel(ui.f.wh, t.raktar) &&
+        match(`${t.azonosito || ''} ${t.megnevezes || ''} ${t.raktar || ''} ${t.polc || ''} ${m.bizonylat} ${m.atvevo ? store.userName(m.atvevo) : ''} ${m.munka || ''} ${m.megjegyzes || ''}`);
     })
     .sort((a, b) => (a.datum !== b.datum ? (a.datum < b.datum ? 1 : -1) : (a.rogzitve < b.rogzitve ? 1 : -1)));
 }
@@ -37,7 +41,8 @@ function groups() {
   const db = store.state.db;
   const whs = store.warehouses();
   return [
-    { key: 'tipus', title: 'Típus', options: Object.entries(L.MOVE_TYPES).map(([k, l]) => [k, l]) },
+    { key: 'fajta', title: 'Anyag / eszköz', options: [['anyag', 'Anyagmozgás'], ['eszkoz', 'Eszközmozgás']] },
+    { key: 'tipus', title: 'Típus', options: [...Object.entries(L.MOVE_TYPES), ...Object.entries(L.TOOL_EVENTS)].map(([k, l]) => [k, l]) },
     { key: 'ki', title: 'Rögzítette', options: [...new Set(db.Mozgasok.map(m => m.felhasznalo).filter(Boolean))].map(e => [e, store.userName(e)]).sort((a, b) => a[1].localeCompare(b[1], 'hu')) },
     { key: 'wh', title: 'Raktár', options: whs.length > 1 ? whs.map(w => [w, w]) : [] },
   ];
@@ -46,8 +51,8 @@ function groups() {
 function bodyHtml() {
   const list = filtered();
   const shown = ui.all ? list : list.slice(0, LIMIT);
-  const byType = Object.keys(L.MOVE_TYPES).map(k => [k, list.filter(m => m.tipus === k).length]).filter(x => x[1]);
-  return html`<div class="tbl-foot">${list.length} mozgás${byType.length ? ` · ${byType.map(([k, n]) => `${n} ${L.MOVE_TYPES[k].toLowerCase()}`).join(' · ')}` : ''}</div>
+  const byType = [...Object.keys(L.MOVE_TYPES), ...Object.keys(L.TOOL_EVENTS)].map(k => [k, list.filter(m => m.tipus === k).length]).filter(x => x[1]);
+  return html`<div class="tbl-foot">${list.length} mozgás${byType.length ? ` · ${byType.map(([k, n]) => `${n} ${L.moveLabel(k).toLowerCase()}`).join(' · ')}` : ''}</div>
     ${list.length ? html`<div class="table-wrap">${movesTable(shown, { withItem: true })}</div>
       ${list.length > shown.length ? html`<button class="btn btn-sm btn-block list-more" data-a="more">Összes megjelenítése (${list.length})</button>` : ''}`
       : html`<div class="empty">${ui.period === '1' && !ui.q ? 'Ma még nem volt mozgás.' : 'Nincs a szűrésnek megfelelő mozgás.'}</div>`}`;
@@ -59,7 +64,7 @@ export default {
     if (root.dataset.view === 'mozgasok' && root.querySelector('[data-body]')) { root.querySelector('[data-body]').innerHTML = String(bodyHtml()); return; }
     root.dataset.view = 'mozgasok';
     root.innerHTML = String(html`
-      <div class="page-head"><h1>Mozgások</h1>${help(html`Minden tétel készletmozgása időrendben, a legújabb elöl. A visszamenőleg rögzített mozgás (pl. utólagos leltár) a rögzítés napján is megjelenik. A sorra kattintva megnyílik a tétel adatlapja.<br><br>${movesLegend()}`)}</div>
+      <div class="page-head"><h1>Mozgások</h1>${help(html`Minden mozgás egy idővonalon, a legújabb elöl: az anyagok (leltár, beérkezés, kivét, korrekció) és az eszközök (kiadás, visszavétel, szerviz, felülvizsgálat…). A visszamenőleg rögzített mozgás (pl. utólagos leltár) a rögzítés napján is megjelenik. A sorra kattintva megnyílik a tétel, ill. az eszköz adatlapja.<br><br>${movesLegend(true)}`)}</div>
       <div class="card">
         <div class="toolbar card-toolbar">
           <div class="seg" role="group" aria-label="Időszak">${PERIODS.map(([v, l]) => html`<button class="${ui.period === v ? 'on' : ''}" data-period="${v}">${l}</button>`)}</div>
@@ -85,6 +90,8 @@ export default {
       const fb = e.target.closest('[data-filter]');
       if (fb) return openFilter(fb, groups, ui.f, refresh);
       if (e.target.closest('[data-a="more"]')) { ui.all = true; return refresh(); }
+      const tool = e.target.closest('tr[data-tool]');
+      if (tool) return openTool(tool.dataset.tool);
       const tr = e.target.closest('tr[data-id]');
       if (tr) showItemDetail(tr.dataset.id);
     };

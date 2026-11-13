@@ -11,8 +11,9 @@ const NAV_FIT = store.NAV_MAX + 1;   // ennyi még a „Több” menü nélkül 
 
 const OP_LABEL = {
   mozgasok: op => {
-    const t = op.rows[0] ? L.MOVE_TYPES[op.rows[0].tipus] : '';
-    return `${t} – ${op.rows.length} tétel${op.rows[0] && op.rows[0].bizonylat ? ' (' + op.rows[0].bizonylat + ')' : ''}`;
+    const kinds = [...new Set(op.rows.map(r => L.moveLabel(r.tipus)))].join(' + ');
+    const biz = op.bizonylat || (op.rows[0] && op.rows[0].bizonylat);
+    return `${kinds} – ${op.rows.length} sor${biz ? ' (' + biz + ')' : ''}${op.alairasok ? ' (aláírással)' : ''}`;
   },
   rendeles: op => `Új rendelés – ${op.sorok.length} tétel`,
   rendeles_lezaras: op => `Rendelés lezárása (${op.rendeles_id})`,
@@ -24,6 +25,11 @@ const OP_LABEL = {
   forras_ar: () => 'Beszerzési ár frissítése',
   sablon_mentes: op => `Leltár sablon mentése: ${op.sablon.nev}`,
   sablon_torles: () => 'Leltár sablon törlése',
+  igeny: op => `Igény: ${op.igeny.megnevezes}`,
+  igeny_kezeles: op => `Igény kezelése${op.statusz ? ` (${L.IGENY_STATUS[op.statusz] || op.statusz})` : ''}`,
+  igeny_torles: () => 'Igény törlése',
+  eszkoz_mentes: op => `Eszköz mentése: ${op.eszkoz.azonosito || ''} ${op.eszkoz.megnevezes}`,
+  eszkoz_esemeny: op => `${L.TOOL_EVENTS[op.rows[0]?.tipus] || 'Eszköz'} – ${op.rows.length} eszköz${op.alairas || op.alairasok ? ' (aláírással)' : ''}`,
 };
 const opLabel = op => (OP_LABEL[op.type] ? OP_LABEL[op.type](op) : op.type);
 

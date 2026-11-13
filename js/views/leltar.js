@@ -3,9 +3,11 @@
 import * as store from '../store.js';
 import { html, fmtNum, fmtDate, matcher, compare, sortArrow, dateStamp, parseNum, confirmDialog, toast, help, popover, modal, sec, todayInput, dateInputToIso, copyText } from '../ui.js';
 import { addOffers, itemSelector, templates, tplIds, filterButton, openFilter, inSel, countOptions } from './common.js';
+import { ICONS } from '../icons.js';
+import { scanCodes, scanButton } from '../qr.js';
 
 const L = window.RaktarLogic;
-// Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } } }
+// Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } }, notes: { tetel_id: szöveg } }
 const slot = store.draftSlot('leltar');
 // cats / whs: indítás (raktár / kategória választó); cf: a számlálólap szűrője; sSel: korábbi leltárak szűrője
 const ui = { q: '', cats: new Set(), whs: new Set(), sSel: { ki: new Set() },
@@ -20,7 +22,7 @@ function start(ids, label) {
   const d = new Date();
   slot.draft = {
     id: `LT-${dateStamp(d)}-${L.newId('', 4)}`,
-    label, started: d.toISOString(), items: sortItems(ids), counts: {},
+    label, started: d.toISOString(), items: sortItems(ids), counts: {}, notes: {},
   };
   ui.q = ''; Object.values(ui.cf).forEach(x => x.clear());
   save();
@@ -85,16 +87,16 @@ function showSession(bizonylat) {
   const rows = L.inventoryDetails(db, bizonylat).map(r => ({ ...r, t: store.itemOrStub(r.tetel_id) }))
     .sort((a, b) => store.placeLabel(a.t).localeCompare(store.placeLabel(b.t), 'hu') || a.t.megnevezes.localeCompare(b.t.megnevezes, 'hu'));
   const diffs = rows.filter(r => r.elteres);
-  const utolag = rows.some(r => r.megjegyzes === 'Utólag rögzített leltár');
+  const utolag = rows.some(r => r.utolag);
   const f = { q: '', onlyDiff: false };
   const body = () => {
     const match = matcher(f.q);
-    const list = rows.filter(r => (!f.onlyDiff || r.elteres) && match(`${r.t.megnevezes} ${store.placeLabel(r.t)}`));
+    const list = rows.filter(r => (!f.onlyDiff || r.elteres) && match(`${r.t.megnevezes} ${store.placeLabel(r.t)} ${r.megjegyzes}`));
     return html`<div class="table-wrap"><table class="tbl cards fixed nochk eq3">
       <colgroup><col><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
       <thead><tr><th>Tétel</th><th class="num">Nyilvántartott</th><th class="num">Megszámolt</th><th class="num">Eltérés</th></tr></thead>
       <tbody>${list.map(r => html`<tr>
-        <td class="c-main">${r.t.megnevezes}<div class="sub">${store.placeLabel(r.t)}</div></td>
+        <td class="c-main">${r.t.megnevezes}<div class="sub">${store.placeLabel(r.t)}${r.megjegyzes ? html` · ${noteHtml(r.megjegyzes)}` : ''}</div></td>
         <td class="num c-f1" data-l="Nyilvántartott">${r.elotte === null ? '–' : fmtNum(r.elotte)}</td>
         <td class="num c-f2" data-l="Megszámolt"><b>${fmtNum(r.mennyiseg)}</b> <span class="small muted">${r.t.mertekegyseg}</span></td>
         <td class="num c-f3" data-l="Eltérés">${r.elteres ? html`<span class="${diffClass(r.elteres, r.elotte)}">${fmtDiff(r.elteres)}</span>` : html`<span class="muted">${r.elteres === 0 ? '✓' : '–'}</span>`}</td>
@@ -123,8 +125,9 @@ function showSession(bizonylat) {
     actions: [{ label: 'Bezárás', value: null }],
   });
   m.el.querySelector('[data-copy]').addEventListener('click', () => {
-    const lines = [['Tétel', 'Hely', 'Nyilvántartott', 'Megszámolt', 'Eltérés', 'Mértékegység'].join('\t'),
-      ...rows.map(r => [r.t.megnevezes, store.placeLabel(r.t), r.elotte ?? '', r.mennyiseg, r.elteres ?? '', r.t.mertekegyseg].join('\t'))];
+    const lines = [['Tétel', 'Hely', 'Nyilvántartott', 'Megszámolt', 'Eltérés', 'Mértékegység', 'Megjegyzés'].join('\t'),
+      ...rows.map(r => [r.t.megnevezes, store.placeLabel(r.t), r.elotte ?? '', r.mennyiseg, r.elteres ?? '', r.t.mertekegyseg,
+        r.megjegyzes.replace(/\s+/g, ' ')].join('\t'))];
     copyText(lines.join('\n'));
   });
   const refresh = () => { m.el.querySelector('[data-body]').innerHTML = String(body()); };
@@ -133,7 +136,7 @@ function showSession(bizonylat) {
 }
 
 function renderStart(root, ctx) {
-  const items = store.activeItems();
+  const items = store.materials();
   const st = store.state.stock;
   const due = items.filter(t => st[t.tetel_id].esedekes);
   const cats = store.categories();
@@ -248,14 +251,24 @@ function diffCell(id) {
   return html`<span class="${diffClass(d, st.keszlet)}" title="${d > 0 ? 'Többlet' : 'Hiány'} a nyilvántartotthoz képest">${fmtDiff(d)}</span>`;
 }
 
+/** Tételhez írt leltári megjegyzés (buborék ikonnal, kiemelve) – a számlálólapon és a leltár részleteinél. */
+const noteHtml = s => html`<span class="inv-note">${ICONS.note} ${s}</span>`;
+
+// Sor bal oldala: név (koppintásra megjegyzés / eltávolítás) + adatok; a megjegyzés az adatsor végére kerül, így a sor nem nő
+function infoHtml(id) {
+  const t = store.get('Tetelek', id);
+  const st = store.state.stock[id];
+  const note = slot.draft.notes?.[id];
+  return html`<div class="name">${t.megnevezes}</div>
+    <div class="meta">${store.placeLabel(t)} · nyilvántartott: ${fmtNum(st.keszlet)} ${t.mertekegyseg} · előző leltár: ${fmtDate(st.leltarDatum)}${note ? html` · ${noteHtml(note)}` : ''}</div>`;
+}
+
 // Sor: név + adatok | eltérés (fix oszlop – beíráskor nem mozdul a lista) | megszámolt mennyiség
 function rowHtml(id) {
   const t = store.get('Tetelek', id);
-  const st = store.state.stock[id];
   const c = slot.draft.counts[id];
   return html`<div class="count-row ${c ? 'done' : ''}" data-id="${id}">
-    <div><div class="name">${t.megnevezes}</div>
-      <div class="meta">${store.placeLabel(t)} · nyilvántartott: ${fmtNum(st.keszlet)} ${t.mertekegyseg} · előző leltár: ${fmtDate(st.leltarDatum)}</div></div>
+    <div class="inv-info" data-menu role="button" tabindex="0" title="Megjegyzés, eltávolítás">${infoHtml(id)}</div>
     <div class="diff">${diffCell(id)}</div>
     <input type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="${t.mertekegyseg}" value="${c ? String(c.q) : ''}" aria-label="${t.megnevezes} mennyiség">
   </div>`;
@@ -286,12 +299,14 @@ function renderCount(root, ctx) {
   }
   root.innerHTML = String(html`
     <div class="page-head"><h1>Leltár: ${slot.draft.label}</h1>
+      ${help('Írd be a megszámolt mennyiséget; Enterrel a következő tételre lépsz. Egy tétel nevére koppintva megjegyzést írhatsz hozzá (pl. máshol van, sérült), vagy eltávolíthatod a leltárból. Ha valami nincs meg, írj be 0-t.')}
       <span class="badge badge-muted">${slot.draft.id}</span><span class="small muted">indítva: ${fmtDate(slot.draft.started, true)}</span></div>
     <div class="card">
       <div class="card-head sticky-search">
         <div class="toolbar head-main" style="margin:0">
           <input type="search" id="q" placeholder="Keresés / tétel hozzáadása…" title="Szűrés a listában; ami nincs a leltárban, a lista alján hozzáadható" value="${ui.q}">
           ${filterButton(ui.cf)}
+          ${scanButton('scan', 'Polc- vagy tételcímke beolvasása')}
         </div>
       </div>
       <div class="count-list" id="list">${parts}</div>
@@ -327,7 +342,7 @@ function renderCount(root, ctx) {
     list.querySelectorAll('.group-title').forEach(g => { g.hidden = !groups[g.dataset.group]; });
     // A keresésre illő, de a leltárban nem szereplő tételek a lista alján hozzáadhatók (egy mező: szűrés + hozzáadás)
     const offers = root.querySelector('#offers');
-    const n = addOffers(offers, ui.q, { title: 'Nincs a leltárban', exclude: new Set(slot.draft.items), onPick: addItem });
+    const n = addOffers(offers, ui.q, { title: 'Nincs a leltárban', items: store.materials, exclude: new Set(slot.draft.items), onPick: addItem });
     if (!n && !offers.innerHTML && !Object.values(groups).some(Boolean)) offers.innerHTML = '<div class="empty small">Nincs a szűrésnek megfelelő tétel.</div>';
   };
   // Tétel felvétele a folyamatban lévő leltárba: a helyére kerül (bejárási sorrend), és rögtön számolható
@@ -339,6 +354,50 @@ function renderCount(root, ctx) {
     const inp = root.querySelector(`.count-row[data-id="${t.tetel_id}"] input`);
     if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
   };
+  // Tétel eltávolítása a folyamatban lévő leltárból (beírt mennyiségnél rákérdez); a görgetési hely megmarad
+  const removeItem = async id => {
+    if (slot.draft.counts[id] && !(await confirmDialog('Eltávolítás a leltárból', 'Ennél a tételnél már van beírt mennyiség. Biztosan eltávolítod a leltárból?', 'Eltávolítás', 'danger'))) return;
+    slot.draft.items = slot.draft.items.filter(x => x !== id);
+    delete slot.draft.counts[id];
+    if (slot.draft.notes) delete slot.draft.notes[id];
+    save();
+    const y = window.scrollY;
+    ctx.rerender();
+    window.scrollTo(0, y);
+    toast('Eltávolítva a leltárból', 'ok');
+  };
+  // Tétel menüje (névre koppintva): megjegyzés gyorsválasztókkal, eltávolítás. A megjegyzés gépelés közben mentődik.
+  const NOTE_QUICK = ['Máshol van', 'Más cikkszámon van', 'Sérült', 'Nem található'];
+  const openMenu = (anchor, id) => popover(anchor, html`
+    <div class="pop-title">Megjegyzés</div>
+    <textarea data-n rows="3" maxlength="500" placeholder="pl. máshol van, más cikkszámon, sérült…" aria-label="Megjegyzés">${slot.draft.notes?.[id] || ''}</textarea>
+    <div class="chip-list">${NOTE_QUICK.map(q => html`<button type="button" class="chip" data-q="${q}">${q}</button>`)}</div>
+    <div class="pop-foot">
+      <button class="btn btn-sm btn-link-danger" data-x="remove">Eltávolítás a leltárból</button>
+      <button class="btn btn-sm btn-primary" data-x="ok">Kész</button></div>`, {
+    minWidth: 300,
+    onMount: (el, close) => {
+      const ta = el.querySelector('[data-n]');
+      const notes = slot.draft.notes || (slot.draft.notes = {});
+      const set = () => { const v = ta.value.trim(); if (v) notes[id] = v; else delete notes[id]; save(); };
+      ta.addEventListener('input', set);
+      el.addEventListener('click', e => {
+        const q = e.target.closest('[data-q]');
+        if (q) {
+          const v = ta.value.trim();
+          ta.value = v ? `${v}, ${q.dataset.q.toLowerCase()}` : q.dataset.q;
+          set(); ta.focus();
+          return;
+        }
+        const x = e.target.closest('[data-x]');
+        if (!x) return;
+        close();
+        if (x.dataset.x === 'remove') removeItem(id);
+      });
+    },
+    // Bezáráskor a sor bal oldala frissül (megjegyzés megjelenítése)
+    onClose: () => { const info = list.querySelector(`.count-row[data-id="${id}"] .inv-info`); if (info) info.innerHTML = String(infoHtml(id)); },
+  });
   progress();
   applyFilter();
 
@@ -358,6 +417,10 @@ function renderCount(root, ctx) {
     progress();
   });
   list.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-menu]')) {
+      e.preventDefault();
+      return openMenu(e.target, e.target.closest('.count-row').dataset.id);
+    }
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
     e.preventDefault();
     const inputs = [...list.querySelectorAll('.count-row:not([hidden]) input')];
@@ -371,8 +434,31 @@ function renderCount(root, ctx) {
   root.onclick = async e => {
     const fb = e.target.closest('[data-filter]');
     if (fb) return openFilter(fb, () => countGroups(ids), ui.cf, applyFilter);
+    const mb = e.target.closest('[data-menu]');
+    if (mb) return openMenu(mb, mb.closest('.count-row').dataset.id);
     const b = e.target.closest('[data-a]');
     if (!b) return;
+    // Polccímke: a lista arra a helyre szűkül; tételcímke: a sorára ugrik (ha nincs a leltárban, felveszi)
+    if (b.dataset.a === 'scan') return scanCodes({ title: 'Polc vagy tétel beolvasása', hint: 'Polccímke: a lista a polc tételeire szűkül. Tételcímke: a mennyiségére ugrik.', onCode: c => {
+      if (c && c.tipus === 'hely') {
+        Object.values(ui.cf).forEach(x => x.clear());
+        ui.q = ''; root.querySelector('#q').value = '';
+        if (c.r) ui.cf.wh.add(c.r);
+        ui.cf.polc.add(c.p);
+        setTimeout(applyFilter, 0);
+        return '';
+      }
+      const t = c && c.tipus === 'tetel' ? store.get('Tetelek', c.id) : null;
+      if (!t || !t.aktiv || L.isToolItem(t)) return false;
+      setTimeout(() => {
+        if (!slot.draft.items.includes(t.tetel_id)) return addItem(t);
+        const row = list.querySelector(`.count-row[data-id="${t.tetel_id}"]`);
+        if (row && row.hidden) { Object.values(ui.cf).forEach(x => x.clear()); ui.q = ''; root.querySelector('#q').value = ''; applyFilter(); }
+        const inp = row?.querySelector('input');
+        if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+      }, 0);
+      return '';
+    } });
     if (b.dataset.a === 'discard') {
       if (!(await confirmDialog('Leltár elvetése', 'A beírt értékek elvesznek. Biztosan elveted?', 'Elvetés', 'danger'))) return;
       await slot.clear(); ctx.rerender();
@@ -387,10 +473,13 @@ function renderCount(root, ctx) {
   // Lezárás: dátum bekérése, majd a megszámolt tételek rögzítése egy műveletben
   async function finish(counted) {
       const missing = ids.length - counted.length;
+      const notes = slot.draft.notes || {};
+      const lostNotes = ids.filter(id => notes[id] && !slot.draft.counts[id]).length;
       const today = todayInput();
       const datum = await modal({
         title: 'Leltár lezárása',
         body: html`<p>${counted.length} tétel kerül rögzítésre.${missing ? ` ${missing} tétel nincs megszámolva – ezeknél a korábbi érték marad.` : ''}</p>
+          ${lostNotes ? html`<div class="notice notice-warn small">${lostNotes} megjegyzés számolatlan tételen van, ezek nem kerülnek rögzítésre. Ha egy tétel nincs meg, írj be 0-t, és a megjegyzés is megmarad.</div>` : ''}
           ${store.state.online ? '' : html`<div class="notice notice-info small">Jelenleg nincs kapcsolat: az adatok a készüléken maradnak, és automatikusan feltöltődnek, amint lesz internet.</div>`}
           ${sec(html`Leltár dátuma ${help('Korábbi (pl. papíron vezetett) leltár utólagos felvitelénél állítsd a tényleges dátumra. A készletszámítás a dátum szerinti sorrendet követi, így a későbbi mozgások helyesen számolódnak rá.')}`,
             html`<label class="field"><span>Dátum</span><input type="date" name="datum" value="${today}" max="${today}"></label>`)}`,
@@ -411,7 +500,7 @@ function renderCount(root, ctx) {
       try {
         await store.enqueue({ type: 'mozgasok', rows: counted.map(id => ({
           mozgas_id: L.newId('M', 12), datum: past ? pastIso : slot.draft.counts[id].at, tipus: 'LELTAR', tetel_id: id,
-          mennyiseg: slot.draft.counts[id].q, bizonylat, megjegyzes: past ? 'Utólag rögzített leltár' : '' })) });
+          mennyiseg: slot.draft.counts[id].q, bizonylat, megjegyzes: L.inventoryNote(past, notes[id]) })) });
         await slot.clear();
         toast('Leltár rögzítve', 'ok');
         ctx.go('attekinto');

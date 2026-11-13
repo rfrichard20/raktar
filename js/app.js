@@ -10,6 +10,11 @@ import rendelesek from './views/rendelesek.js';
 import torzsadatok from './views/torzsadatok.js';
 import kimutatasok from './views/kimutatasok.js';
 import mozgasok from './views/mozgasok.js';
+import igenyek from './views/igenyek.js';
+import visszavetel from './views/visszavetel.js';
+import eszkozok, { openTool } from './views/eszkozok.js';
+import { setPlaceFilter } from './views/attekinto.js';
+import { parseCode, scanCodes, canScan } from './qr.js';
 import fiok from './views/fiok.js';
 import login from './views/login.js';
 import { attachPicker, showItemDetail } from './views/common.js';
@@ -22,15 +27,27 @@ const GROUPS = { keszlet: 'Készlet', muveletek: 'Raktári műveletek', beszerze
 
 // A ROUTES sorrendje az alapértelmezett menüsorrend (mobilon az első NAV_MAX az alsó sávban)
 const ROUTES = {
-  attekinto: { view: attekinto, label: 'Áttekintő', icon: 'grid', role: 'olvaso', group: 'keszlet' },
+  // Készlet: anyagkészlet (fogyóanyag, mennyiségben) és eszközkészlet (egyedi darabok) – két nézet, közös csoport
+  // short: rövid felirat a mobil alsó sávba (ha a teljes nem fér ki)
+  attekinto: { view: attekinto, label: 'Anyagkészlet', short: 'Anyagok', icon: 'grid', role: 'olvaso', group: 'keszlet' },
   leltar: { view: leltar, label: 'Leltár', icon: 'clipboard', role: 'raktaros', group: 'muveletek',
-    badge: () => ({ n: store.activeItems().filter(t => store.state.stock[t.tetel_id]?.esedekes).length, text: 'esedékes leltár' }) },
+    badge: () => ({ n: store.materials().filter(t => store.state.stock[t.tetel_id]?.esedekes).length, text: 'esedékes leltár' }) },
   beerkezes: { view: beerkezes, label: 'Beérkezés', icon: 'inbox', role: 'raktaros', group: 'muveletek',
     badge: () => ({ n: store.openOrders().length, text: 'várható szállítás' }) },
-  kivet: { view: kivet, label: 'Kivét', icon: 'out', role: 'szerelo', group: 'muveletek' },
+  // Kiadás: anyag (kivét) és eszköz (kiadás) egy bizonylaton – a szerelő csak anyagot (a kulcs történeti okból „kivet”)
+  kivet: { view: kivet, label: 'Kiadás', icon: 'out', role: 'szerelo', group: 'muveletek' },
+  // Visszavétel: a kiadott eszközök visszavétele (személyenként, aláírással)
+  visszavetel: { view: visszavetel, label: 'Visszavétel', icon: 'in', role: 'raktaros', group: 'muveletek' },
+  // Eszközök (eszközkészlet): mindenki látja (a szerelő a „Nálam” szűrővel a sajátjait); értesítés a raktárosnak: lejárt felülvizsgálat.
+  // A menüsorban a Kivét után marad (mobilon az alsó sáv első négy helye ne változzon), az oldalsávon a Készlet csoportban jelenik meg.
+  eszkozok: { view: eszkozok, label: 'Eszközök', icon: 'tool', role: 'olvaso', group: 'keszlet',
+    badge: () => ({ n: store.can('raktaros') ? Object.values(store.state.db.Eszkozok ? store.L.toolStates(store.state.db) : {}).filter(s => s.felulvizsgalat === 'lejart').length : 0, text: 'lejárt felülvizsgálat' }) },
   // badge: a menüpont értesítése (darabszám + magyarázat); 0-nál nem látszik
   rendelesek: { view: rendelesek, label: 'Rendelés', icon: 'cart', role: 'rendeles', group: 'beszerzes',
     badge: () => ({ n: Object.values(store.state.stock).filter(x => x.javaslat > 0).length, text: 'pótolandó tétel' }) },
+  // Igények: a szerelő a sajátjait, a raktáros mindet (értesítés: az új, még nem kezelt igények)
+  igenyek: { view: igenyek, label: 'Igények', icon: 'request', role: 'szerelo', group: 'beszerzes',
+    badge: () => ({ n: store.can('raktaros') ? (store.state.db.Igenyek || []).filter(i => i.statusz === 'uj').length : 0, text: 'új igény' }) },
   kimutatasok: { view: kimutatasok, label: 'Kimutatás', icon: 'chart', role: 'kimutatas', group: 'keszlet' },
   mozgasok: { view: mozgasok, label: 'Mozgások', icon: 'moves', role: 'mozgasok', group: 'keszlet' },
   // Raktáros is eléri, de nála csak a Leltársablonok fül látszik
@@ -93,7 +110,7 @@ function renderNav(active) {
   $('nav').innerHTML = String(html`${groups.map((g, gi) => html`<div class="nav-group" style="--og:${gi * 50}">${g.title}</div>`)}
     ${links.map(([key, r]) => html`
     <a href="#/${key}" style="--o:${order.includes(key) ? order.indexOf(key) : 99};--og:${og[key] ?? 999}" class="${key === active ? 'active' : ''} ${r.bottom ? 'nav-bottom' : ''} ${extra.includes(key) ? 'nav-extra' : ''}">
-      ${ICONS[r.icon]}<span class="lbl">${r.label}</span>${badgeHtml(badgeOf(key))}
+      ${ICONS[r.icon]}${r.short ? html`<span class="lbl"><span class="lbl-full">${r.label}</span><span class="lbl-short">${r.short}</span></span>` : html`<span class="lbl">${r.label}</span>`}${badgeHtml(badgeOf(key))}
     </a>`)}
     ${extra.length ? html`<button type="button" class="nav-more ${extra.includes(active) ? 'active' : ''}" data-navmore aria-label="További menüpontok">
       ${ICONS.more}<span class="lbl">Több</span>${badgeHtml(moreBadge, extraBadges.map(b => `${b.n} ${b.text}`).join(', '))}</button>` : ''}`);
@@ -155,7 +172,7 @@ function render() {
     document.body.classList.add('logged-out');
     renderStatus();
     $('userbtn').hidden = true;
-    $('gsearch').hidden = $('gsearch-btn').hidden = true;
+    $('gsearch').hidden = $('gsearch-btn').hidden = $('scan-btn').hidden = true;
     $('ptitle').textContent = '';
     login.render($('view'));
     return;
@@ -163,7 +180,15 @@ function render() {
   document.body.classList.remove('logged-out');
   $('userbtn').hidden = false;
   $('gsearch').hidden = $('gsearch-btn').hidden = false;
+  $('scan-btn').hidden = !canScan();
   let { name, params } = parseHash();
+  // QR-címke linkje (#/q?…): az Áttekintőre lép, és onnan nyitja meg, amire a kód mutat
+  if (name === 'q') {
+    const code = parseCode(location.hash);
+    history.replaceState(null, '', '#/attekinto');
+    name = 'attekinto'; params = {};
+    setTimeout(() => openCode(code), 0);
+  }
   if (!ROUTES[name] || !store.can(ROUTES[name].role)) {
     name = 'attekinto'; params = {};
     history.replaceState(null, '', '#/attekinto'); // a címsor is kövesse (nincs jog / ismeretlen oldal)
@@ -311,6 +336,34 @@ store.subscribe(kind => {
 });
 
 window.addEventListener('hashchange', render);
+
+/* ---------- QR-kód megnyitása (címke linkje vagy a felső sáv beolvasója) ---------- */
+/** Tétel → adatlap; eszköz → az Eszközök oldalon az adatlapja; hely → az Áttekintő az adott polc tételeivel. */
+function openCode(code) {
+  if (!code) { toast('Ismeretlen vagy már nem létező kód.', 'warn'); return false; }
+  if (code.tipus === 'tetel') {
+    if (!store.get('Tetelek', code.id)) { toast('Ez a tétel már nincs a nyilvántartásban.', 'warn'); return false; }
+    showItemDetail(code.id);
+  } else if (code.tipus === 'eszkoz') {
+    if (!store.can(ROUTES.eszkozok.role)) return false;
+    if (current?.name !== 'eszkozok') go('eszkozok');
+    setTimeout(() => { if (!openTool(code.azonosito)) toast('Nincs ilyen eszköz: ' + code.azonosito, 'warn'); }, 50);
+  } else if (code.tipus === 'hely') {
+    setPlaceFilter(code.r, code.p);
+    delete $('view').dataset.view;
+    if (current?.name === 'attekinto') render(); else go('attekinto');
+  }
+  return true;
+}
+(function scanButton() {
+  const btn = $('scan-btn');
+  btn.innerHTML = String(ICONS.scan);
+  btn.addEventListener('click', () => scanCodes({
+    title: 'QR-kód beolvasása',
+    hint: 'Tétel-, polc- vagy eszközcímke. A kód megnyitja a hozzá tartozó adatlapot vagy listát.',
+    onCode: code => (openCode(code) ? '' : false),
+  }));
+})();
 
 /* ---------- Gyors tételkereső a felső sávban ---------- */
 // Bármelyik oldalról: név / cikkszám / polc → a tétel adatlapja. Mobilon a nagyító ikon nyitja, és a sávot kitölti.

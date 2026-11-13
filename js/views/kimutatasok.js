@@ -24,7 +24,7 @@ function compute() {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth() - ui.period + 1, 1);
   const fromIso = from.toISOString();
-  const items = store.activeItems();
+  const items = store.materials();
 
   // Készletérték
   let total = 0, noPrice = 0;

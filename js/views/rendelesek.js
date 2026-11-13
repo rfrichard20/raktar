@@ -6,12 +6,33 @@ import { ICONS } from '../icons.js';
 
 const L = window.RaktarLogic;
 const ui = { tab: 'javaslat', all: false, open: new Set() };
-// Vázlat (rendelési lista): { list: { tetel_id: { origin: 'javaslat'|'kezi', forras_id?, q?, ar?, cart? } },
+// Vázlat (rendelési lista): { list: { tetel_id: { origin: 'javaslat'|'kezi'|'igeny', igenyek?: [igeny_id], forras_id?, q?, ar?, cart? } },
 // skip: { tetel_id: true }, mode: { beszallito_id: 'webshop'|'email' } }. Régi formátumú vázlat: üres lista.
 const slot = store.draftSlot('javaslat', d => (d && d.list ? d : { list: {}, skip: {} }));
 const save = slot.save;
 
 const supKey = f => (f ? f.beszallito_id : '');
+// Honnan került a tétel a listára: [ikon, osztály, felirat]
+const ORIGIN = {
+  javaslat: ['bulb', 'is-sug', 'A feltöltési javaslatból'],
+  kezi: ['hand', 'is-man', 'Kézzel hozzáadva'],
+  igeny: ['user', 'is-req', 'Igényből'],
+};
+/** A listabejegyzés még rendelhető (nyitott) igényei. */
+const openIgenyek = sel => (sel.igenyek || []).map(id => store.get('Igenyek', id))
+  .filter(ig => ig && (ig.statusz === 'uj' || ig.statusz === 'folyamatban'));
+
+/**
+ * Tétel a rendelési listára egy igényből (Igények oldal). A bejegyzés megjegyzi az igényt; a rendelés
+ * rögzítésekor a szerver összeköti őket, és onnantól a rendelés / beérkezés frissíti az igény állapotát.
+ */
+export async function addToOrderList(tetelId, igenyId, q) {
+  const d = await slot.load();
+  const sel = d.list[tetelId] || (d.list[tetelId] = { origin: 'igeny' });
+  sel.igenyek = [...new Set([...(sel.igenyek || []), igenyId])];
+  if (q && sel.q === undefined) sel.q = String(q);
+  await save();
+}
 function supSort(a, b) {
   if (a === b) return 0;
   if (!a) return 1;
@@ -102,7 +123,8 @@ function listRows() {
     const arRaw = sel.ar !== undefined ? sel.ar : (arMaster ? String(arMaster) : '');
     const ar = parseNum(arRaw);
     return { id, t, s, sel, srcs, f, javasolt, qRaw, q: parseNum(qRaw), arRaw, ar: isNaN(ar) ? 0 : ar, arMaster,
-      arChanged: !!f && !isNaN(ar) && arRaw !== '' && ar !== arMaster, cart: !!sel.cart, origin: sel.origin || 'kezi' };
+      arChanged: !!f && !isNaN(ar) && arRaw !== '' && ar !== arMaster, cart: !!sel.cart, origin: sel.origin || 'kezi',
+      igenyek: openIgenyek(sel) };
   }).sort((a, b) => a.t.megnevezes.localeCompare(b.t.megnevezes, 'hu'));
 }
 
@@ -132,6 +154,7 @@ function renderLista(body, ctx) {
         <b>Jelölések</b><br>
         <span class="legend-row"><span class="origin-ico is-sug">${ICONS.bulb}</span> a feltöltési javaslatból került a listára</span>
         <span class="legend-row"><span class="origin-ico is-man">${ICONS.hand}</span> kézzel hozzáadva</span>
+        <span class="legend-row"><span class="origin-ico is-req">${ICONS.user}</span> igényből (a rendelés az igényt is frissíti)</span>
         <span class="legend-row">${ICONS.ext} megnyitás a webshopban (a cikkszám a vágólapra kerül)</span>
         <span class="legend-row">${ICONS.swap} másik beszerzési forrás választása</span>
         <span class="legend-row">${ICONS.x} levétel a listáról</span>
@@ -166,8 +189,8 @@ function renderLista(body, ctx) {
             return html`<tr data-id="${r.id}" class="${r.cart ? 'row-done' : ''}">
             <td class="c-chk">${sup ? html`<input type="checkbox" data-k="cart" ${r.cart ? 'checked' : ''} ${canEdit ? '' : 'disabled'} aria-label="${web ? 'Kosárba téve' : 'Rendelésbe'}">` : ''}</td>
             <td class="c-main"><a href="#" data-a="detail">${r.t.megnevezes}</a>
-              <span class="origin-ico ${r.origin === 'javaslat' ? 'is-sug' : 'is-man'}" title="${r.origin === 'javaslat' ? 'A feltöltési javaslatból' : 'Kézzel hozzáadva'}" aria-label="${r.origin === 'javaslat' ? 'A feltöltési javaslatból' : 'Kézzel hozzáadva'}">${r.origin === 'javaslat' ? ICONS.bulb : ICONS.hand}</span>
-              <div class="sub">Készlet ${fmtNum(r.s.keszlet)} · min ${fmtNum(r.t.min_keszlet)} · cél ${fmtNum(r.t.cel_keszlet)} ${r.t.mertekegyseg}${r.s.uton ? ` · úton ${fmtNum(r.s.uton)}` : ''}</div></td>
+              ${(([ico, cls, lbl]) => html`<span class="origin-ico ${cls}" title="${lbl}" aria-label="${lbl}">${ICONS[ico]}</span>`)(ORIGIN[r.origin] || ORIGIN.kezi)}
+              <div class="sub">Készlet ${fmtNum(r.s.keszlet)} · min ${fmtNum(r.t.min_keszlet)} · cél ${fmtNum(r.t.cel_keszlet)} ${r.t.mertekegyseg}${r.s.uton ? ` · úton ${fmtNum(r.s.uton)}` : ''}${r.igenyek.length ? ` · igény: ${r.igenyek.map(ig => `${store.userName(ig.igenylo)} (${fmtNum(ig.mennyiseg)})`).join(', ')}` : ''}</div></td>
             <td class="c-meta"><span class="cikk-cell">
               ${url ? html`<button class="icon-btn icon-sm" data-a="openshop" data-url="${url}" data-cikk="${r.f.cikkszam}" title="Megnyitás a webshopban (cikkszám a vágólapra)" aria-label="Megnyitás a webshopban">${ICONS.ext}</button>`
                 : html`<span class="icon-slot" aria-hidden="true"></span>`}
@@ -309,7 +332,8 @@ async function createOrderInner(k, sup, web, list, lines, ctx) {
       rendeles: { rendeles_id: rid, datum: d.toISOString(), beszallito_id: k, belso_azon: v.belso_azon,
         megjegyzes: v.megjegyzes || (web ? 'Webshop' : '') },
       sorok: list.map((r, i) => ({ sor_id: `${rid}-${i + 1}`, tetel_id: r.id, forras_id: r.f.forras_id,
-        cikkszam: r.f.cikkszam, mennyiseg: r.q, egysegar: r.ar, megjegyzes: '' })),
+        cikkszam: r.f.cikkszam, mennyiseg: r.q, egysegar: r.ar, megjegyzes: '',
+        ...(r.igenyek.length ? { igenyek: r.igenyek.map(ig => ig.igeny_id) } : {}) })),
     });
     if (v.arment) for (const r of changed) await store.enqueue({ type: 'forras_ar', forras_id: r.f.forras_id, egysegar: r.ar });
     list.forEach(r => { delete slot.draft.list[r.id]; });
