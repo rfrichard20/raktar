@@ -61,9 +61,16 @@ function bodyHtml() {
 async function editIgeny(ig) {
   const isNew = !ig;
   const v = ig || { megnevezes: '', leiras: '', mennyiseg: 1, mertekegyseg: 'db', link: '', surgos: false, hatarido: '' };
+  // A raktáros egy kolléga nevében is felveheti az igényt (pl. telefonon szóltak): választható igénylő, alapból ő maga
+  const boss = store.can('raktaros');
+  const me = store.state.user.email;
+  const users = (store.state.db.Felhasznalok || []).filter(u => u.aktiv !== false || u.email === v.igenylo)
+    .sort((a, b) => (a.nev || a.email).localeCompare(b.nev || b.email, 'hu'));
   const res = await modal({
     title: isNew ? 'Új igény' : 'Igény módosítása',
     body: html`
+      ${boss ? sec('Ki kéri?', html`<label class="field span-2"><span>Igénylő ${help('Ha egy kolléga nevében veszed fel (pl. szólt telefonon), válaszd ki őt: az igény az ő listájában is megjelenik, és ő is követheti. A rögzítő (te) külön elmentődik.')}</span>
+        <select name="igenylo">${users.map(u => html`<option value="${u.email}" ${u.email === (v.igenylo || me) ? 'selected' : ''}>${u.nev || u.email}${u.email === me ? ' (én)' : ''}</option>`)}</select></label>`) : ''}
       ${sec('Mire van szükség?', html`
         <label class="field span-2"><span>Megnevezés *</span><input name="megnevezes" value="${v.megnevezes}" placeholder="pl. akkus fúrógép, SDS fúrószár 8 mm" maxlength="200"></label>
         <label class="field span-2"><span>Leírás</span><textarea name="leiras" maxlength="2000" placeholder="Mire kell, milyen legyen, mi a gond a régivel…">${v.leiras}</textarea></label>
@@ -81,7 +88,7 @@ async function editIgeny(ig) {
         if (isNaN(q) || q < 0) { toast('Hibás mennyiség.', 'warn'); return false; }
         if (f.link.trim() && !/^https?:\/\//i.test(f.link.trim())) { toast('A link http:// vagy https:// kezdetű legyen.', 'warn'); return false; }
         const igeny = { igeny_id: ig ? ig.igeny_id : L.newId('I', 10), megnevezes: f.megnevezes, leiras: f.leiras, mennyiseg: q,
-          mertekegyseg: f.mertekegyseg, link: f.link.trim(), surgos: f.surgos, hatarido: dayIso(f.hatarido) };
+          mertekegyseg: f.mertekegyseg, link: f.link.trim(), surgos: f.surgos, hatarido: dayIso(f.hatarido), ...(boss ? { igenylo: f.igenylo } : {}) };
         try { await store.enqueue({ type: 'igeny', igeny }); }
         catch (x) { toast(x.message, 'error', 6000); return false; }
         toast(isNew ? 'Igény rögzítve' : 'Mentve', 'ok');
@@ -120,7 +127,7 @@ function showIgeny(id) {
       <div class="facts facts-row">
         <div><dt>Állapot</dt><dd>${badge(ig.statusz)}</dd></div>
         ${ig.surgos ? html`<div><dt>Sürgősség</dt><dd class="${isOpen(ig) ? 't-err' : ''}">Sürgős</dd></div>` : ''}
-        <div><dt>Igénylő</dt><dd>${store.userName(ig.igenylo)}</dd></div>
+        <div><dt>Igénylő</dt><dd>${store.userName(ig.igenylo)}${ig.rogzitette && ig.rogzitette !== ig.igenylo ? html` <span class="small muted">(rögzítette: ${store.userName(ig.rogzitette)})</span>` : ''}</dd></div>
         <div><dt>Igényelve</dt><dd>${fmtDate(ig.datum, true)}</dd></div>
         <div><dt>Mennyiség</dt><dd>${qtyText(ig)}</dd></div>
         <div><dt>Határidő</dt><dd>${deadline(ig)}</dd></div>

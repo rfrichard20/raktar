@@ -66,7 +66,9 @@ var RaktarLogic = (function () {
       ['igeny_id', 'str'], ['datum', 'date'], ['igenylo', 'str'], ['megnevezes', 'str'], ['leiras', 'str'],
       ['mennyiseg', 'num'], ['mertekegyseg', 'str'], ['link', 'str'], ['surgos', 'bool'], ['hatarido', 'date'],
       ['statusz', 'str'], ['tetel_id', 'str'], ['rendeles_sor_id', 'str'], ['valasz', 'str'], ['kezelte', 'str'],
-      ['modositva', 'date']] },
+      ['modositva', 'date'],
+      // Aki rögzítette (a raktáros egy kolléga nevében is felveheti: akkor az igenylo a kolléga)
+      ['rogzitette', 'str']] },
     // Szerszámok, eszközök: egyedi darabok. azonosito: címkére nyomtatott kód (pl. SZ-0001), egyedi;
     // allapot: TOOL_STATE kulcsa; felulvizsgalat_nap: időszakos felülvizsgálat ciklusa (0 = nincs)
     Eszkozok: { key: 'eszkoz_id', cols: [
@@ -88,7 +90,7 @@ var RaktarLogic = (function () {
   function isToolItem(t) { return !!t && t.keszletezes === 'eszkoz'; }
   var TOOL_STATE = { rendben: 'Rendben', javitando: 'Javítandó', szervizben: 'Szervizben', selejtezve: 'Selejtezve', elveszett: 'Elveszett' };
   var TOOL_EVENTS = { KIADAS: 'Kiadás', VISSZAVETEL: 'Visszavétel', SZERVIZ: 'Szervizbe adás', SZERVIZBOL: 'Szervizből vissza',
-    ALLAPOT: 'Állapotváltozás', FELULVIZSGALAT: 'Felülvizsgálat', SELEJTEZES: 'Selejtezés' };
+    ALLAPOT: 'Állapotváltozás', FELULVIZSGALAT: 'Felülvizsgálat', SELEJTEZES: 'Selejtezés', ELLENORZES: 'Leltári ellenőrzés' };
   /** Mozgástípus felirata – anyag (MOVE_TYPES) és eszköz (TOOL_EVENTS) egyaránt. */
   function moveLabel(t) { return own(MOVE_TYPES, t) ? MOVE_TYPES[t] : own(TOOL_EVENTS, t) ? TOOL_EVENTS[t] : t; }
   var IGENY_STATUS = { uj: 'Új', folyamatban: 'Folyamatban', rendelve: 'Rendelve', teljesitve: 'Teljesítve', elutasitva: 'Elutasítva' };
@@ -436,6 +438,10 @@ var RaktarLogic = (function () {
       r.allapot = 'selejtezve';
     } else if (r.tipus === 'FELULVIZSGALAT') {
       if (r.allapot === 'szervizben' || r.allapot === 'selejtezve') fail('Érvénytelen állapot.');
+    } else if (r.tipus === 'ELLENORZES') {
+      // Eszközleltár: megvan a raktárban. A kiadott / szervizben lévő eszközt előbb vissza kell venni.
+      if (s.hely !== 'raktar') fail('Nincs a raktárban (' + (s.hely === 'kiadva' ? 'kiadva' : 'szervizben') + '): ' + nev);
+      r.allapot = '';
     }
   }
 
@@ -498,8 +504,15 @@ var RaktarLogic = (function () {
       checkId(r.igeny_id);
       row.datum = now;
       row.igenylo = user.email;
+      row.rogzitette = user.email;
       row.statusz = 'uj';
       row.tetel_id = ''; row.rendeles_sor_id = ''; row.valasz = ''; row.kezelte = '';
+    }
+    // Igénylő egy kolléga nevében: csak raktáros adhatja meg, és csak létező felhasználó (így a kolléga is látja a sajátjai között)
+    if (r.igenylo && hasRole(user, 'raktaros')) {
+      var u = get(db, 'Felhasznalok', String(r.igenylo).toLowerCase());
+      if (!u) fail('Ismeretlen igénylő.');
+      row.igenylo = u.email;
     }
     put(db, 'Igenyek', row, changes);
   }
@@ -558,7 +571,7 @@ var RaktarLogic = (function () {
     var out = {};
     nowMs = nowMs || Date.now();
     (db.Eszkozok || []).forEach(function (e) {
-      out[e.eszkoz_id] = { eszkoz_id: e.eszkoz_id, hely: 'raktar', kinel: '', miota: '', bizonylat: '', felulvizsgalva: '', kovetkezo: '', felulvizsgalat: '' };
+      out[e.eszkoz_id] = { eszkoz_id: e.eszkoz_id, hely: 'raktar', kinel: '', miota: '', bizonylat: '', felulvizsgalva: '', kovetkezo: '', felulvizsgalat: '', ellenorizve: '' };
     });
     // A közös mozgásnapló eszközsorai, időrendben
     sortedMoves(db).forEach(function (ev) {
@@ -569,6 +582,7 @@ var RaktarLogic = (function () {
       } else if (ev.tipus === 'VISSZAVETEL' || ev.tipus === 'SZERVIZBOL') {
         s.hely = 'raktar'; s.kinel = ''; s.miota = ''; s.bizonylat = '';
       } else if (ev.tipus === 'FELULVIZSGALAT') s.felulvizsgalva = ev.datum;
+      else if (ev.tipus === 'ELLENORZES') s.ellenorizve = ev.datum;
     });
     (db.Eszkozok || []).forEach(function (e) {
       var s = out[e.eszkoz_id], n = toNum(e.felulvizsgalat_nap);

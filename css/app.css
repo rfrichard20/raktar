@@ -74,7 +74,7 @@
 /* Eszközmozgások (a közös mozgásnaplóban) */
 .mv-KIADAS { --mv: var(--warn); --mv-soft: var(--warn-soft); }
 .mv-VISSZAVETEL, .mv-SZERVIZBOL { --mv: var(--ok); --mv-soft: var(--ok-soft); }
-.mv-SZERVIZ, .mv-FELULVIZSGALAT { --mv: var(--info); --mv-soft: var(--info-soft); }
+.mv-SZERVIZ, .mv-FELULVIZSGALAT, .mv-ELLENORZES { --mv: var(--info); --mv-soft: var(--info-soft); }
 .mv-ALLAPOT { --mv: var(--purple); --mv-soft: var(--purple-soft); }
 .mv-SELEJTEZES { --mv: var(--err); --mv-soft: var(--err-soft); }
 
@@ -481,6 +481,9 @@ tr.click:focus-visible, [role=button]:focus-visible { outline: 2px solid var(--p
    ill. alatta (alsó sáv) */
 .count-row input { font-size: 1.15rem; text-align: right; font-weight: 600; min-height: 46px; scroll-margin-top: calc(var(--top-h) + var(--head-h, 0px) + 2.5rem); scroll-margin-bottom: 90px; }
 /* Eltérés: fix oszlop a beviteli mező előtt (beíráskor nem tolja el a listát); színe a mérték szerint, 0 szürkén */
+/* Eszközleltár sora (eszkozleltar.js): a megszámolt mező helyén jelölőnégyzet */
+.count-row.tool-check { cursor: pointer; }
+.count-row.tool-check input[type=checkbox] { width: 26px; height: 26px; min-height: 0; }
 .count-row .diff { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Sor bal oldala: koppintásra a tétel menüje (megjegyzés, eltávolítás); a súgó írja le, ikon nincs */
 .inv-info { min-width: 0; cursor: pointer; border-radius: 6px; }

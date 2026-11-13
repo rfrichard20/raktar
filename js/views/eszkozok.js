@@ -504,6 +504,7 @@ function showTool(id) {
         <div><dt>Állapot</dt><dd>${stateBadge(e.allapot)}</dd></div>
         <div><dt>Hol van</dt><dd>${where(s, e)}${s.miota ? html` <span class="small muted">(${fmtDate(s.miota)} óta)</span>` : ''}</dd></div>
         ${s.hely !== 'raktar' && placeOf(e) ? html`<div><dt>Tárolási hely</dt><dd>${placeOf(e)}</dd></div>` : ''}
+        ${s.ellenorizve ? html`<div><dt>Leltárban látva</dt><dd>${fmtDate(s.ellenorizve)}</dd></div>` : ''}
         ${store.get('Tetelek', e.tetel_id) ? html`<div><dt>Típus</dt><dd><a href="#" data-x="TYPE">${store.get('Tetelek', e.tetel_id).megnevezes}</a></dd></div>` : ''}
         ${e.kategoria ? html`<div><dt>Kategória</dt><dd>${e.kategoria}</dd></div>` : ''}
         ${e.gyarto || e.tipus ? html`<div><dt>Gyártó, modell</dt><dd>${[e.gyarto, e.tipus].filter(Boolean).join(' ')}</dd></div>` : ''}

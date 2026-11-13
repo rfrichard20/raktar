@@ -5,6 +5,7 @@ import { html, fmtNum, fmtDate, matcher, compare, sortArrow, dateStamp, parseNum
 import { addOffers, itemSelector, templates, tplIds, filterButton, openFilter, inSel, countOptions } from './common.js';
 import { ICONS } from '../icons.js';
 import { scanCodes, scanButton } from '../qr.js';
+import { toolSlot, toolCheckCard, startToolCheck, renderToolCheck } from './eszkozleltar.js';
 
 const L = window.RaktarLogic;
 // Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } }, notes: { tetel_id: szöveg } }
@@ -171,6 +172,7 @@ function renderStart(root, ctx) {
         <span class="grow" style="min-width:0"><b>Egyedi / sablon ▾</b>
           <span class="small muted d-block ellipsis">${templates().length ? templates().map(s => s.nev).join(', ') : 'tételek kijelölése, sablon mentése'}</span></span>
       </div>
+      ${toolCheckCard()}
     </div>
     ${sessionsHtml()}`);
 
@@ -222,6 +224,7 @@ function renderStart(root, ctx) {
     const b = e.target.closest('[data-a]');
     if (!b) return;
     if (b.dataset.a === 'moresessions') { ui.allSessions = true; return refreshSessions(); }
+    if (b.dataset.a === 'toolcheck') return startToolCheck(ctx);
     if (b.dataset.a === 'catpick') return openPicker(b);
     if (b.dataset.a === 'custom') return openCustom(b);
     if (b.dataset.a === 'due') start(due.map(t => t.tetel_id), 'Esedékes tételek');
@@ -509,9 +512,12 @@ function renderCount(root, ctx) {
 }
 
 export default {
-  get liveUpdate() { return !slot.draft; },
+  get liveUpdate() { return !slot.draft && !toolSlot.draft; },
   render(root, params, ctx) {
-    if (!slot.ready(root, ctx)) return;
-    if (!slot.draft) renderStart(root, ctx); else renderCount(root, ctx);
+    if (!slot.ready(root, ctx) || !toolSlot.ready(root, ctx)) return;
+    // Folyamatban lévő eszközleltár / anyagleltár (egyszerre egy-egy is lehet; az eszközleltár elöl)
+    if (toolSlot.draft) renderToolCheck(root, ctx);
+    else if (slot.draft) renderCount(root, ctx);
+    else renderStart(root, ctx);
   },
 };

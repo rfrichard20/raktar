@@ -1,10 +1,13 @@
-// Kimutatások: készletérték, rendelési költés, felhasználás és forgás.
+// Kimutatások – Anyag fül: készletérték, rendelési költés, felhasználás és forgás; Eszköz fül: állomány, felülvizsgálatok,
+// kiadások személyenként, kihasználtság (a közös mozgásnaplóból).
 import * as store from '../store.js';
-import { html, fmtNum, fmtMoney, help, esc } from '../ui.js';
+import { html, fmtNum, fmtMoney, fmtDate, help, esc } from '../ui.js';
 import { showItemDetail } from './common.js';
+import { openTool } from './eszkozok.js';
 
 const L = window.RaktarLogic;
-const ui = { period: 12, by: 'kategoria', usage: 'gyors' };
+// tab: 'anyag' | 'eszkoz' – a két kimutatás (az időszak közös)
+const ui = { tab: 'anyag', period: 12, by: 'kategoria', usage: 'gyors' };
 const MONTHS = ['jan.', 'febr.', 'márc.', 'ápr.', 'máj.', 'jún.', 'júl.', 'aug.', 'szept.', 'okt.', 'nov.', 'dec.'];
 
 const compactFt = n => (n >= 1e6 ? fmtNum(Math.round(n / 1e5) / 10) + ' M Ft' : n >= 1e4 ? fmtNum(Math.round(n / 1e3)) + ' e Ft' : fmtMoney(n));
@@ -148,17 +151,127 @@ function usageTable(rows) {
       : html`<div class="empty small">Nincs ilyen tétel a választott időszakban.</div>`}`;
 }
 
+/* ---------- Eszköz kimutatás ---------- */
+const DAY = 86400000;
+/** Eszközök az időszakban: események, kiadások személyenként, kihasználtság (kint töltött idő aránya), felülvizsgálatok. */
+function computeTools() {
+  const db = store.state.db;
+  const st = store.state.stock;
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - ui.period + 1, 1);
+  const fromMs = from.getTime(), nowMs = now.getTime(), span = Math.max(1, nowMs - fromMs);
+  const fromIso = from.toISOString();
+  const states = L.toolStates(db);
+  const tools = (db.Eszkozok || []).filter(e => e.allapot !== 'selejtezve');
+  const moves = db.Mozgasok.filter(m => m.eszkoz_id).sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : 0));
+  const inWin = moves.filter(m => m.datum >= fromIso);
+  const count = t => inWin.filter(m => m.tipus === t).length;
+  // Kint töltött idő eszközönként: a kiadástól a visszavételig tartó szakaszok, az időszakra vágva
+  const out = {}, open = {}, per = {};
+  moves.forEach(m => {
+    const id = m.eszkoz_id, t = Date.parse(m.datum);
+    per[id] = per[id] || { kiadas: 0, szerviz: 0 };
+    if (m.datum >= fromIso) { if (m.tipus === 'KIADAS') per[id].kiadas++; if (m.tipus === 'SZERVIZ') per[id].szerviz++; }
+    if (m.tipus === 'KIADAS') open[id] = t;
+    else if (m.tipus === 'VISSZAVETEL' && open[id] != null) {
+      out[id] = (out[id] || 0) + Math.max(0, Math.min(t, nowMs) - Math.max(open[id], fromMs));
+      delete open[id];
+    }
+  });
+  Object.keys(open).forEach(id => { out[id] = (out[id] || 0) + Math.max(0, nowMs - Math.max(open[id], fromMs)); });
+  const usage = tools.map(e => ({ e, napok: (out[e.eszkoz_id] || 0) / DAY, arany: Math.min(100, Math.round((out[e.eszkoz_id] || 0) / span * 100)),
+    kiadas: per[e.eszkoz_id]?.kiadas || 0, szerviz: per[e.eszkoz_id]?.szerviz || 0 }))
+    .sort((a, b) => b.arany - a.arany || b.kiadas - a.kiadas);
+  // Kiadások személyenként (az időszakban)
+  const byPerson = new Map();
+  inWin.filter(m => m.tipus === 'KIADAS').forEach(m => {
+    const k = m.atvevo || '–';
+    const g = byPerson.get(k) || { label: store.userName(k), value: 0, n: 0 };
+    g.value++; byPerson.set(k, g);
+  });
+  // Eszközállomány értéke: darabonként a típus elsődleges forrásának egységára (ha van típus és ár)
+  let value = 0, noPrice = 0;
+  tools.forEach(e => { const p = e.tetel_id ? st[e.tetel_id]?.egysegar || 0 : 0; if (p) value += p; else noPrice++; });
+  const fv = tools.filter(e => states[e.eszkoz_id].felulvizsgalat === 'lejart' || states[e.eszkoz_id].felulvizsgalat === 'kozel')
+    .sort((a, b) => (states[a.eszkoz_id].kovetkezo || '') < (states[b.eszkoz_id].kovetkezo || '') ? -1 : 1);
+  return {
+    tools, states, usage, value, noPrice, fv, byPerson: [...byPerson.values()].sort((a, b) => b.value - a.value),
+    kiadva: tools.filter(e => states[e.eszkoz_id].hely === 'kiadva').length,
+    events: { kiadas: count('KIADAS'), szerviz: count('SZERVIZ'), felulvizsgalat: count('FELULVIZSGALAT'), selejtezes: count('SELEJTEZES'),
+      leltar: new Set(inWin.filter(m => m.tipus === 'ELLENORZES').map(m => m.bizonylat)).size },
+    fromLabel: `${MONTHS[from.getMonth()]} ${from.getFullYear()}`,
+  };
+}
+
+function toolsHtml(seg) {
+  const d = computeTools();
+  const arak = store.can('arak');
+  if (!d.tools.length) return html`<div class="card"><div class="empty">Még nincs eszköz a nyilvántartásban.</div></div>`;
+  const n = v => `${fmtNum(v)} db`;
+  return html`
+    <section class="report-section">
+      <div class="report-section-head"><h2>Jelenlegi állapot</h2><span class="sub">a mai nyilvántartás alapján</span></div>
+      <div class="stats">
+        <div class="stat"><div class="v">${d.tools.length}</div><div class="l">Aktív eszköz</div></div>
+        <div class="stat"><div class="v">${d.kiadva} <span class="small muted">(${pct(d.kiadva, d.tools.length)}%)</span></div><div class="l">Most kiadva</div></div>
+        ${arak && d.value ? html`<div class="stat" title="Darabonként a típus elsődleges beszerzési ára${d.noPrice ? ` – ${d.noPrice} eszköznek nincs ára (típus vagy forrás nélkül)` : ''}"><div class="v">${compactFt(d.value)}</div><div class="l">Eszközállomány értéke</div></div>` : ''}
+        <div class="stat ${d.fv.length ? 'warn' : ''}"><div class="v">${d.fv.length}</div><div class="l">Lejárt / 30 napon belüli felülvizsgálat</div></div>
+      </div>
+      ${d.fv.length ? html`<div class="card"><div class="card-head"><h2 class="grow">Felülvizsgálat</h2></div>
+        <div class="table-wrap"><table class="tbl cards nochk"><thead><tr><th>Eszköz</th><th>Következő</th><th>Hol van</th></tr></thead>
+        <tbody>${d.fv.map(e => { const s = d.states[e.eszkoz_id]; return html`<tr class="click" data-tool="${e.azonosito}" tabindex="0">
+          <td class="c-main"><b>${e.azonosito}</b> ${e.megnevezes}</td>
+          <td class="c-f1" data-l="Következő"><span class="${s.felulvizsgalat === 'lejart' ? 't-err' : 't-warn'}">${s.kovetkezo ? fmtDate(s.kovetkezo) : 'nincs adat'}</span></td>
+          <td class="c-f2" data-l="Hol van">${s.hely === 'kiadva' ? store.userName(s.kinel) : s.hely === 'szerviz' ? 'Szervizben' : 'Raktárban'}</td></tr>`; })}</tbody></table></div></div>` : ''}
+    </section>
+    <section class="report-section">
+      <div class="report-section-head"><h2>Időszak</h2><span class="sub">${d.fromLabel} – ma</span>${seg('period', [[3, '3 hónap'], [6, '6 hónap'], [12, '12 hónap']])}</div>
+      <div class="stats">
+        <div class="stat"><div class="v">${d.events.kiadas}</div><div class="l">Kiadás</div></div>
+        <div class="stat"><div class="v">${d.events.szerviz}</div><div class="l">Szervizbe adás</div></div>
+        <div class="stat"><div class="v">${d.events.felulvizsgalat}</div><div class="l">Felülvizsgálat</div></div>
+        <div class="stat"><div class="v">${d.events.leltar}</div><div class="l">Eszközleltár</div></div>
+        ${d.events.selejtezes ? html`<div class="stat"><div class="v">${d.events.selejtezes}</div><div class="l">Selejtezés</div></div>` : ''}
+      </div>
+      <div class="report-grid">
+        <div class="card">
+          <div class="card-head"><h2 class="grow">Kiadások személyenként</h2></div>
+          <div class="card-pad">${hbars(d.byPerson, d.events.kiadas, n)}</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2 class="grow">Kihasználtság</h2>${help('Az időszak hány százalékában volt kint az eszköz (kiadástól visszavételig). A ritkán használt eszköz felesleges lehet, a mindig kint lévőből kevés lehet.')}</div>
+          <div class="table-wrap"><table class="tbl cards nochk flow"><thead><tr><th>Eszköz</th><th class="num">Kint</th><th class="num">Kiadás</th><th class="num">Szerviz</th></tr></thead>
+          <tbody>${d.usage.slice(0, 15).map(u => html`<tr class="click" data-tool="${u.e.azonosito}" tabindex="0">
+            <td class="c-main"><b>${u.e.azonosito}</b> ${u.e.megnevezes}</td>
+            <td class="num" data-l="Kint"><b>${u.arany}%</b> <span class="small muted">${fmtNum(Math.round(u.napok))} nap</span></td>
+            <td class="num" data-l="Kiadás">${u.kiadas}</td>
+            <td class="num" data-l="Szerviz">${u.szerviz || '–'}</td></tr>`)}</tbody></table></div>
+          ${d.usage.length > 15 ? html`<div class="tbl-foot">+ ${d.usage.length - 15} további eszköz</div>` : ''}
+        </div>
+      </div>
+    </section>`;
+}
+
 /* ---------- Oldal ---------- */
 export default {
   render(root, params, ctx) {
+    const seg = (key, opts) => html`<div class="seg" role="group">${opts.map(([v, l]) => html`<button class="${ui[key] === v ? 'on' : ''}" data-set="${key}" data-v="${v}">${l}</button>`)}</div>`;
+    const tabs = html`<div class="tabs"><button class="${ui.tab === 'eszkoz' ? '' : 'active'}" data-set="tab" data-v="anyag">Anyag</button>
+      <button class="${ui.tab === 'eszkoz' ? 'active' : ''}" data-set="tab" data-v="eszkoz">Eszköz</button></div>`;
+    if (ui.tab === 'eszkoz') {
+      root.innerHTML = String(html`<div class="page-head"><h1>Kimutatások</h1>
+        ${help('Eszközök: a jelenlegi állomány, a lejáró felülvizsgálatok, és a választott időszak kiadásai, szervizei, kihasználtsága (a közös mozgásnaplóból).')}</div>
+        ${tabs}${toolsHtml(seg)}<div class="chart-tip" hidden></div>`);
+      return bind(root, ctx);
+    }
     const d = compute();
     const whs = store.warehouses();
     if (ui.by === 'raktar' && whs.length < 2) ui.by = 'kategoria';
     const groups = d.groupBy(ui.by);
-    const seg = (key, opts) => html`<div class="seg" role="group">${opts.map(([v, l]) => html`<button class="${ui[key] === v ? 'on' : ''}" data-set="${key}" data-v="${v}">${l}</button>`)}</div>`;
     root.innerHTML = String(html`
       <div class="page-head"><h1>Kimutatások</h1>
         ${help('A készletérték az aktuális készlet × az elsődleges beszerzési forrás egységára. A felhasználás a rögzített kivétekből és a leltárkor talált hiányból adódik; a nem rögzített kivét csak a következő leltárnál derül ki, ezért a pontosság a leltárak gyakoriságától is függ.')}</div>
+      ${tabs}
 
       <section class="report-section">
         <div class="report-section-head"><h2>Jelenlegi állapot</h2><span class="sub">a mai készlet alapján – az időszak nem befolyásolja</span></div>
@@ -198,10 +311,17 @@ export default {
         </div>
       </section>
       <div class="chart-tip" hidden></div>`);
+    bind(root, ctx);
+  },
+};
 
+/** Közös események: fül / időszak / bontás váltás, sorra kattintás (tétel vagy eszköz adatlapja), diagram-tooltip. */
+function bind(root, ctx) {
     root.onclick = e => {
       const s = e.target.closest('[data-set]');
       if (s) { const v = s.dataset.v; ui[s.dataset.set] = /^\d+$/.test(v) ? Number(v) : v; return ctx.rerender(); }
+      const tool = e.target.closest('tr[data-tool]');
+      if (tool) return openTool(tool.dataset.tool);
       const tr = e.target.closest('tr[data-id]');
       if (tr) showItemDetail(tr.dataset.id);
     };
@@ -221,5 +341,4 @@ export default {
     };
     root.onpointerdown = root.onpointermove; // érintőképernyő: koppintásra
     root.onpointerleave = () => { tip.hidden = true; };
-  },
-};
+}

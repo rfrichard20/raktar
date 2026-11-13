@@ -442,6 +442,7 @@ const MOVE_SVG = {
   ALLAPOT: '<circle cx="12" cy="12" r="4.5"/>',      // állapot
   FELULVIZSGALAT: '<path d="m6 12 4 4 8-8"/><path d="M12 3v2M12 19v2"/>', // ellenőrzés
   SELEJTEZES: '<path d="M6 6l12 12M18 6 6 18"/>',    // x – kivezetve
+  ELLENORZES: '<path d="M4 7h10M4 12h7M4 17h6"/><path d="m14 15 2.5 2.5L21 13"/>', // lista pipával – leltári ellenőrzés
 };
 export function moveIcon(tipus) {
   return raw(`<span class="mv-ico mv-${esc(tipus)}" title="${esc(L.moveLabel(tipus))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${MOVE_SVG[tipus] || ''}</svg></span>`);
