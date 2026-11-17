@@ -55,7 +55,7 @@ function sessionRows() {
 function sessionsBody() {
   const { list, f } = sessionRows();
   const shown = ui.allSessions ? list : list.slice(0, 10);
-  return html`<table class="tbl cards fixed nochk">
+  return html`<table class="tbl cards fixed">
     <colgroup><col style="width:22%"><col class="m-hide" style="width:24%"><col><col style="width:12%"><col style="width:12%"></colgroup>
     <thead><tr>${S_COLS.map(([k, l, , cls]) => html`<th class="sortable ${cls}" data-ssort="${k}">${l}<span class="arrow">${sortArrow(f.sort === k, f.dir)}</span></th>`)}</tr></thead>
     <tbody>${shown.length ? shown.map(s => html`<tr class="click" data-lt="${s.bizonylat}" tabindex="0">
@@ -95,7 +95,7 @@ function showSession(bizonylat) {
   const body = () => {
     const match = matcher(f.q);
     const list = rows.filter(r => (!f.onlyDiff || r.elteres) && match(`${r.t.megnevezes} ${store.placeLabel(r.t)} ${r.megjegyzes}`));
-    return html`<div class="table-wrap"><table class="tbl cards fixed nochk eq3">
+    return html`<div class="table-wrap"><table class="tbl cards fixed eq3">
       <colgroup><col><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
       <thead><tr><th>Tétel</th><th class="num">Nyilvántartott</th><th class="num">Megszámolt</th><th class="num">Eltérés</th></tr></thead>
       <tbody>${list.map(r => html`<tr>

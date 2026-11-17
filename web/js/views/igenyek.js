@@ -45,7 +45,7 @@ function bodyHtml() {
   const list = filtered();
   const showWho = store.can('igenyek');
   if (!list.length) return html`<div class="empty">${all().length ? 'Nincs a szűrésnek megfelelő igény.' : 'Még nincs igény. Az „Új igény” gombbal rögzíthetsz.'}</div>`;
-  return html`<div class="table-wrap"><table class="tbl cards fixed nochk marked">
+  return html`<div class="table-wrap"><table class="tbl cards fixed marked">
     <colgroup><col><col style="width:24%"><col style="width:12%"><col style="width:12%"><col style="width:13%"></colgroup>
     <thead><tr><th>Igény</th><th>Igényelve</th><th class="num">Mennyiség</th><th>Határidő</th><th>Állapot</th></tr></thead>
     <tbody>${list.map(ig => html`<tr class="click ${rowMark(ig) ? `st-row-${rowMark(ig)}` : ''}" data-ig="${ig.igeny_id}" tabindex="0" ${markTitle(ig) ? html`title="${markTitle(ig)}"` : ''}>

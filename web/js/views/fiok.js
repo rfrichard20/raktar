@@ -58,7 +58,7 @@ function syncLogHtml() {
       <b>Hálózat + indulás:</b> az adat útja és a szerver elindulása – ezen nem lehet gyorsítani. <b>Készülék:</b> a válasz utáni helyi mentés és készletszámítás. <b>Adat:</b> a letöltött válasz mérete.`)}
       <span class="grow"></span><button class="btn btn-sm" data-a="copylog" title="Táblázatként a vágólapra">Másolás</button></div>
     <p class="small muted card-note">Átlag – ${Object.keys(SYNC_KIND).map(avg).filter(Boolean).join(' · ')}</p>
-    <div class="table-wrap"><table class="tbl small cards nochk flow">
+    <div class="table-wrap"><table class="tbl small cards flow">
       <thead><tr><th>Időpont</th>${SYNC_COLS.map(([l], i) => html`<th class="${i ? 'num' : ''}">${l}</th>`)}</tr></thead>
       <tbody>${log.map(e => html`<tr><td class="c-main nowrap">${fmtDate(e.at, true)}</td>${SYNC_COLS.map(([l, v], i) => html`<td class="${i ? 'num' : ''}" data-l="${l}">${v(e)}</td>`)}</tr>`)}</tbody>
     </table></div>

@@ -53,7 +53,7 @@ function historyBody() {
     .filter(w => match(`${w.bizonylat} ${store.userName(w.atvevo)} ${w.munka} ${w.megjegyzes} ${fmtDate(w.datum)} ${w.sorok.map(subjectName).join(' ')}`))
     .sort((a, b) => compare(col[2](a), col[2](b)) * ui.dir);
   const shown = ui.all ? list : list.slice(0, 15);
-  return html`<table class="tbl cards fixed nochk">
+  return html`<table class="tbl cards fixed">
     <colgroup><col style="width:16%"><col style="width:22%"><col><col style="width:16%"><col class="m-hide" style="width:18%"></colgroup>
     <thead><tr>${H_COLS.map(([k, l, , cls]) => html`<th class="sortable ${cls}" data-hsort="${k}">${l}<span class="arrow">${sortArrow(ui.sort === k, ui.dir)}</span></th>`)}</tr></thead>
     <tbody>${shown.length ? shown.map(w => html`<tr class="click" data-w="${w.bizonylat}" tabindex="0">
@@ -82,14 +82,14 @@ function showWithdrawal(bizonylat) {
         <div><dt>Bizonylat</dt><dd class="small">${w.bizonylat}</dd></div>
         ${w.megjegyzes ? html`<div><dt>Megjegyzés</dt><dd>${w.megjegyzes}</dd></div>` : ''}
       </dl>
-      ${anyag.length ? html`<h3 class="sec-h">Anyagok</h3><div class="table-wrap"><table class="tbl cards nochk eq3">
+      ${anyag.length ? html`<h3 class="sec-h">Anyagok</h3><div class="table-wrap"><table class="tbl cards eq3">
         <thead><tr><th>Tétel</th><th>Hely</th><th class="num">Mennyiség</th></tr></thead>
         <tbody>${anyag.map(mv => { const t = store.itemOrStub(mv.tetel_id); return html`<tr>
           <td class="c-main">${t.megnevezes}</td>
           <td class="c-f1" data-l="Hely">${t.raktar || t.polc ? store.placeLabel(t) : '–'}</td>
           <td class="num c-f2" data-l="Mennyiség"><span class="move-date">${moveIcon('KIVET')} <b>${fmtNum(mv.mennyiseg)}</b> <span class="small muted">${t.mertekegyseg}</span></span></td>
         </tr>`; })}</tbody></table></div>` : ''}
-      ${eszk.length ? html`<h3 class="sec-h">Eszközök</h3><div class="table-wrap"><table class="tbl cards nochk">
+      ${eszk.length ? html`<h3 class="sec-h">Eszközök</h3><div class="table-wrap"><table class="tbl cards">
         <thead><tr><th>Eszköz</th><th>Gyári szám</th></tr></thead>
         <tbody>${eszk.map(mv => { const e = store.get('Eszkozok', mv.eszkoz_id) || { azonosito: '?', megnevezes: mv.eszkoz_id }; return html`<tr class="click" data-tool="${e.azonosito}">
           <td class="c-main">${moveIcon('KIADAS')} <b>${e.azonosito}</b> ${e.megnevezes}</td><td class="c-f1" data-l="Gyári szám">${e.gyari_szam || '–'}</td></tr>`; })}</tbody></table></div>` : ''}`,
@@ -178,7 +178,7 @@ function renderForm(root, ctx) {
     <div class="card">
       <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Anyag keresése és hozzáadása…" autocomplete="off"></div>${scanButton('scan', canTools() ? 'Tétel- vagy eszközcímke beolvasása' : 'Tételcímke beolvasása')}${enterBackHtml()}</div>
       <h3 class="sec-h" style="margin:.75rem 1rem .25rem">Anyagok</h3>
-      ${d.items.length ? html`<div class="table-wrap"><table class="tbl cards nochk fixed">
+      ${d.items.length ? html`<div class="table-wrap"><table class="tbl cards fixed">
         <colgroup><col><col style="width:18%"><col style="width:22%"><col style="width:56px"></colgroup>
         <thead><tr><th>Tétel</th><th class="num">Készlet</th><th>Kiadott mennyiség</th><th></th></tr></thead>
         <tbody data-items>${itemRows()}</tbody></table></div>`
@@ -186,7 +186,7 @@ function renderForm(root, ctx) {
       ${canTools() ? html`
         <h3 class="sec-h" style="margin:1rem 1rem .25rem">Eszközök</h3>
         <div class="toolbar" style="margin:0 1rem .5rem"><div class="picker grow" style="max-width:420px"><input id="addtool" placeholder="+ Eszköz keresése (azonosító, név)…" autocomplete="off"></div></div>
-        ${d.tools.length ? html`<div class="table-wrap"><table class="tbl cards nochk fixed"><colgroup><col><col style="width:56px"></colgroup>
+        ${d.tools.length ? html`<div class="table-wrap"><table class="tbl cards fixed"><colgroup><col><col style="width:56px"></colgroup>
           <thead><tr><th>Eszköz</th><th></th></tr></thead><tbody>${toolRows()}</tbody></table></div>`
           : html`<div class="empty small">Ha eszközt is visz, keresd ki vagy olvasd be a címkéjét.</div>`}` : ''}
       <div class="bottom-bar"><span class="grow small muted">${n ? [d.items.length && `${d.items.length} anyag`, d.tools.length && `${d.tools.length} eszköz`].filter(Boolean).join(' · ') : ''}</span>

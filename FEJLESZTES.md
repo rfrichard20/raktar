@@ -134,7 +134,12 @@ sync, syncErr, ext, swap, star, bulb, hand, edit, x, out (kivét), in (bevét), 
 
 ---
 
-## 4. Felületi elemek (CSS – `web/css/app.css`)
+## 4. Felületi elemek (CSS – `web/kozos/kozos.css` + `web/css/app.css`)
+
+A közös stílusok (színtokenek, alapok, keret: felső sáv / menü; kártya, `.stat`, gombok, jelvények, űrlapmezők, `.opt`, szűrősor,
+kereső, `.tbl` / `.tbl.cards` / `.jelol`, `.chip`, `.notice`, adatlap-fejléc, `.popover`, `.modal`, toast, `.login`) a
+`web/kozos/kozos.css`-ben vannak – **itt nem szerkeszthetők**, forrásuk a `..\Kozos_Claude`. Az `app.css` csak a Raktár saját
+elemeit és eltéréseit tartalmazza (azonos szelektorral felülírva). Az alábbi jegyzék mindkettőt felsorolja.
 
 ### Oldal és elrendezés
 | Osztály | Mire |
@@ -166,10 +171,13 @@ Cellák helye mobilon: `c-main` (cím), `c-meta` (alcím sor), `c-act` (jobb fel
 `c-f1`…`c-f4` (címkézett mezők – a címke a `data-l` attribútum). Ha a sorban nincs `c-act`, a cím a teljes szélességet kapja.
 `c-f2 c-span2`: a második mező a sor végéig ér (pl. beviteli mező figyelmeztetéssel).
 
+A táblázat, a kártya-táblázat alapja és a `.jelol` változat a **közös** `kozos.css`-ben van (a Tereppel azonos; jegyzék:
+`..\Kozos_Claude\FEJLESZTES.md`). Itt a Raktár saját változatai is.
+
 | Változat | Mikor |
 |---|---|
-| `.tbl.cards` | Van jelölőnégyzet-oszlop (`c-chk`). |
-| `.tbl.cards.nochk` | Nincs jelölőnégyzet (a legtöbb lista). |
+| `.tbl.cards` | Alap: nincs jelölőnégyzet-oszlop (a legtöbb lista). |
+| `.tbl.cards.jelol` | Jelölőnégyzet-oszlop: az első `th` és a sorok első cellája `c-chk`; mobilon „Mind kijelölése” fejléc, ha a `th`-ban van jelölőnégyzet (rendelési javaslat, rendelés összeállítása, beérkezés). |
 | `… .eq3` | Három egyforma számoszlop. |
 | `… .flow` | Sok vagy változó számú mező: a `c-main` után minden `data-l` cella 3 oszlopba tördelve. Hosszú érték: `c-wide` (teljes sor). |
 | `.fixed` | Rögzített oszlopszélesség asztalon (`<colgroup>`), gépeléskor nem ugrál. |

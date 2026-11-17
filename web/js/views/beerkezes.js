@@ -36,7 +36,7 @@ function startBody() {
   const list = store.openOrders().map(x => ({ ...x, open: x.info.sorok.filter(s => !s.lezarva).length }))
     .filter(x => inSel(ui.f.st, x.info.statusz) && match(store.orderSearchText(x.o)))
     .sort((a, b) => compare(col[2](a), col[2](b)) * ui.dir);
-  return html`<table class="tbl cards fixed nochk">
+  return html`<table class="tbl cards fixed">
     <colgroup><col><col style="width:22%"><col style="width:14%"><col style="width:12%"><col style="width:17%"></colgroup>
     <thead><tr>${O_COLS.map(([k, l, , cls]) => html`<th class="sortable ${cls}" data-osort="${k}">${l}<span class="arrow">${sortArrow(ui.sort === k, ui.dir)}</span></th>`)}</tr></thead>
     <tbody>${list.length ? list.map(({ o, info, open }) => {
@@ -98,8 +98,8 @@ function renderOrder(root, ctx) {
     <div class="card card-pad">${headerFields()}</div>
     <div class="card">
       <div class="card-head"><h2>Tételek</h2><span class="grow"></span><button class="btn btn-sm" data-a="all">Mind megérkezett</button></div>
-      ${lines.length ? html`<div class="table-wrap"><table class="tbl cards">
-        <thead><tr><th style="width:40px"></th><th>Tétel</th><th class="num">Rendelt</th><th class="num">Már megjött</th><th class="num">Hátralévő</th><th class="w-qty">Most érkezett</th></tr></thead>
+      ${lines.length ? html`<div class="table-wrap"><table class="tbl cards jelol">
+        <thead><tr><th class="c-chk"></th><th>Tétel</th><th class="num">Rendelt</th><th class="num">Már megjött</th><th class="num">Hátralévő</th><th class="w-qty">Most érkezett</th></tr></thead>
         <tbody>${lines.map(s => {
           const t = store.itemOrStub(s.tetel_id);
           const rem = L.round3(s.mennyiseg - s.beerkezett);
@@ -204,7 +204,7 @@ function renderFree(root, ctx) {
     </div>
     <div class="card">
       <div class="card-head sticky-search"><div class="picker head-main"><input id="add" placeholder="+ Tétel keresése és hozzáadása…" autocomplete="off"></div>${enterBackHtml()}</div>
-      ${slot.draft.items.length ? html`<div class="table-wrap"><table class="tbl cards nochk"><thead><tr><th>Tétel</th><th class="w-qty">Mennyiség</th><th style="width:50px"></th></tr></thead>
+      ${slot.draft.items.length ? html`<div class="table-wrap"><table class="tbl cards"><thead><tr><th>Tétel</th><th class="w-qty">Mennyiség</th><th style="width:50px"></th></tr></thead>
         <tbody>${slot.draft.items.map((it, i) => {
           const t = store.itemOrStub(it.tetel_id);
           return html`<tr data-i="${i}"><td class="c-main">${t.megnevezes}<div class="sub">${store.placeLabel(t)} · ${t.mertekegyseg}</div></td>

@@ -136,7 +136,7 @@ export default {
         <div id="ptools"></div>
         <div class="tbl-foot" id="count"></div>
         <div class="table-wrap">
-          <table class="tbl cards fixed overview nochk">
+          <table class="tbl cards fixed overview">
             <colgroup>${COLS.map(c => html`<col class="${c[2].includes('m-hide') ? 'm-hide' : ''}" ${c[3] ? html`style="width:${c[3]}"` : ''}>`)}</colgroup>
             <thead><tr>${COLS.map(([k, l, cls]) => html`<th class="sortable ${cls || ''}" data-sort="${k}">${l}<span class="arrow"></span></th>`)}</tr></thead>
             <tbody id="tbody"></tbody>

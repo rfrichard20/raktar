@@ -136,7 +136,7 @@ function usageTable(rows) {
   }
   const fed = r => (r.fedezet === Infinity ? 'nem fogy' : r.fedezet > 36 ? '> 3 év' : r.fedezet >= 1 ? `~${fmtNum(Math.round(r.fedezet))} hó` : r.havi > 0 ? '< 1 hó' : '–');
   return html`<p class="small muted card-note">${note}</p>
-    ${list.length ? html`<div class="table-wrap"><table class="tbl cards nochk flow">
+    ${list.length ? html`<div class="table-wrap"><table class="tbl cards flow">
       <thead><tr><th>Tétel</th>${ui.usage === 'tobblet' ? html`<th class="num">Többlet</th>` : html`<th class="num">Felhasználás</th><th class="num">Havi átlag</th>`}
         <th class="num">Készlet</th><th class="num">Elég kb.</th><th class="num">${ui.usage === 'allo' ? 'Készletérték' : 'Érték'}</th></tr></thead>
       <tbody>${list.slice(0, 15).map(r => html`<tr class="click" data-id="${r.t.tetel_id}" tabindex="0">
@@ -218,7 +218,7 @@ function toolsHtml(seg) {
         <div class="stat ${d.fv.length ? 'warn' : ''}"><div class="v">${d.fv.length}</div><div class="l">Lejárt / 30 napon belüli felülvizsgálat</div></div>
       </div>
       ${d.fv.length ? html`<div class="card"><div class="card-head"><h2 class="grow">Felülvizsgálat</h2></div>
-        <div class="table-wrap"><table class="tbl cards nochk"><thead><tr><th>Eszköz</th><th>Következő</th><th>Hol van</th></tr></thead>
+        <div class="table-wrap"><table class="tbl cards"><thead><tr><th>Eszköz</th><th>Következő</th><th>Hol van</th></tr></thead>
         <tbody>${d.fv.map(e => { const s = d.states[e.eszkoz_id]; return html`<tr class="click" data-tool="${e.azonosito}" tabindex="0">
           <td class="c-main"><b>${e.azonosito}</b> ${e.megnevezes}</td>
           <td class="c-f1" data-l="Következő"><span class="${s.felulvizsgalat === 'lejart' ? 't-err' : 't-warn'}">${s.kovetkezo ? fmtDate(s.kovetkezo) : 'nincs adat'}</span></td>
@@ -240,7 +240,7 @@ function toolsHtml(seg) {
         </div>
         <div class="card">
           <div class="card-head"><h2 class="grow">Kihasználtság</h2>${help('Az időszak hány százalékában volt kint az eszköz (kiadástól visszavételig). A ritkán használt eszköz felesleges lehet, a mindig kint lévőből kevés lehet.')}</div>
-          <div class="table-wrap"><table class="tbl cards nochk flow"><thead><tr><th>Eszköz</th><th class="num">Kint</th><th class="num">Kiadás</th><th class="num">Szerviz</th></tr></thead>
+          <div class="table-wrap"><table class="tbl cards flow"><thead><tr><th>Eszköz</th><th class="num">Kint</th><th class="num">Kiadás</th><th class="num">Szerviz</th></tr></thead>
           <tbody>${d.usage.slice(0, 15).map(u => html`<tr class="click" data-tool="${u.e.azonosito}" tabindex="0">
             <td class="c-main"><b>${u.e.azonosito}</b> ${u.e.megnevezes}</td>
             <td class="num" data-l="Kint"><b>${u.arany}%</b> <span class="small muted">${fmtNum(Math.round(u.napok))} nap</span></td>

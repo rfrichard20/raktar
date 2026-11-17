@@ -81,7 +81,7 @@ function listHtml() {
   const st = states();
   const list = filtered(st);
   if (!list.length) return html`<div class="empty">${tools().length ? 'Nincs a szűrésnek megfelelő eszköz.' : 'Még nincs eszköz. Az „Új eszköz” gombbal vehetsz fel.'}</div>`;
-  return html`<div class="table-wrap"><table class="tbl cards fixed nochk marked">
+  return html`<div class="table-wrap"><table class="tbl cards fixed marked">
     <colgroup><col style="width:11%"><col><col style="width:22%"><col style="width:13%"><col style="width:13%"></colgroup>
     <thead><tr><th>Azonosító</th><th>Eszköz</th><th>Hol van</th><th>Állapot</th><th>Felülvizsgálat</th></tr></thead>
     <tbody>${list.map(e => {
@@ -515,7 +515,7 @@ function showTool(id) {
       ${e.megjegyzes ? html`<p class="small" style="white-space:pre-line">${e.megjegyzes}</p>` : ''}
       ${acts.length ? html`<div class="toolbar" style="margin:1rem 0 0">${acts.map(([k, l, kind]) => html`<button class="btn btn-sm ${kind ? 'btn-' + kind : ''}" data-x="${k}">${l}</button>`)}</div>` : ''}
       <h3 style="margin:1.25rem 0 .5rem">Előzmények</h3>
-      ${hist.length ? html`<div class="table-wrap"><table class="tbl small cards nochk flow">
+      ${hist.length ? html`<div class="table-wrap"><table class="tbl small cards flow">
         <thead><tr><th>Dátum</th><th>Esemény</th><th>Kinél / kitől</th><th>Megjegyzés</th><th>Rögzítette</th></tr></thead>
         <tbody>${hist.map(ev => html`<tr>
           <td class="c-meta nowrap">${fmtDate(ev.datum, true)}</td>
@@ -562,7 +562,7 @@ export async function addUnitsAfterReceipt(rows) {
     title: 'Beérkezett eszközök felvétele',
     wide: true,
     body: html`<p class="small muted" style="margin-top:0">Az azonosító a címkére kerül (átírható). A gyári szám nem kötelező.</p>
-      <div class="table-wrap"><table class="tbl small nochk"><thead><tr><th>Típus</th><th>Azonosító</th><th>Gyári szám</th></tr></thead>
+      <div class="table-wrap"><table class="tbl small"><thead><tr><th>Típus</th><th>Azonosító</th><th>Gyári szám</th></tr></thead>
       <tbody>${lines.map((l, i) => html`<tr><td>${l.t.megnevezes}</td>
         <td><input data-c="${i}" value="${l.code}" maxlength="30" style="max-width:9rem"></td>
         <td><input data-g="${i}" placeholder="opcionális"></td></tr>`)}</tbody></table></div>

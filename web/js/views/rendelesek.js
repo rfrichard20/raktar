@@ -69,9 +69,9 @@ function renderJavaslat(body, ctx) {
       <span class="grow"></span>
       ${canEdit ? html`<button class="btn btn-primary" data-a="tolist" ${chosen.length ? '' : 'disabled'}>Kijelöltek a rendelési listára (${chosen.length}) ›</button>` : ''}
     </div>
-    <div class="card">${rows.length ? html`<div class="table-wrap"><table class="tbl cards fixed">
+    <div class="card">${rows.length ? html`<div class="table-wrap"><table class="tbl cards fixed jelol">
       <colgroup><col style="width:44px"><col><col style="width:30%"><col style="width:11%"><col style="width:15%"></colgroup>
-      <thead><tr><th>${canEdit && avail.length ? html`<input type="checkbox" data-k="all" ${chosen.length === avail.length ? 'checked' : ''} title="Mind kijelölése" aria-label="Mind kijelölése">` : ''}</th>
+      <thead><tr><th class="c-chk">${canEdit && avail.length ? html`<input type="checkbox" data-k="all" ${chosen.length === avail.length ? 'checked' : ''} title="Mind kijelölése" aria-label="Mind kijelölése">` : ''}</th>
         <th>Tétel</th><th>Beszállító / cikkszám</th><th class="num">Úton</th><th class="num">Javasolt</th></tr></thead>
       <tbody>${rows.map(r => html`<tr data-id="${r.t.tetel_id}" class="${r.onList ? 'row-done' : slot.draft.skip[r.t.tetel_id] ? 'off' : ''}">
         <td class="c-chk">${r.onList ? html`<span class="badge badge-ok" title="Már a rendelési listán">✓</span>`
@@ -179,10 +179,10 @@ function renderLista(body, ctx) {
             ${canEdit ? html`<button class="btn btn-sm btn-primary" data-a="create" data-g="${k}" ${on.length ? '' : 'disabled'}>Rendelés rögzítése</button>` : ''}
           </div>` : ''}
         </div>
-        <div class="table-wrap"><table class="tbl cards fixed">
+        <div class="table-wrap"><table class="tbl cards fixed jelol">
           <colgroup><col style="width:44px"><col><col style="width:18%"><col style="width:9%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:72px"></colgroup>
           <thead><tr>
-            <th>${canEdit && sup ? html`<input type="checkbox" data-k="all" data-g="${k}" ${allOn ? 'checked' : ''} title="${web ? 'Mind kosárban' : 'Mind kijelölése'}" aria-label="Mind kijelölése">` : ''}</th>
+            <th class="c-chk">${canEdit && sup ? html`<input type="checkbox" data-k="all" data-g="${k}" ${allOn ? 'checked' : ''} title="${web ? 'Mind kosárban' : 'Mind kijelölése'}" aria-label="Mind kijelölése">` : ''}</th>
             <th>Tétel</th><th>Cikkszám</th><th class="num">Csomag</th><th>Mennyiség</th><th>Egységár</th><th class="num">Érték</th><th></th></tr></thead>
           <tbody>${list.map(r => {
             const url = sup ? L.productUrl(sup, r.f) : '';
@@ -362,7 +362,7 @@ function ordersList(canEdit) {
         <span class="badge badge-${cls}">${lbl}</span><span aria-hidden="true">${isOpen ? '▾' : '▸'}</span>
       </div>
       ${isOpen ? html`<div style="padding:0 1rem 1rem;border-bottom:1px solid var(--border)">
-        <div class="table-wrap"><table class="tbl small cards nochk flow">
+        <div class="table-wrap"><table class="tbl small cards flow">
           <thead><tr><th>Tétel</th><th>Cikkszám</th><th class="num">Rendelt</th><th class="num">Megérkezett</th><th>Állapot</th></tr></thead>
           <tbody>${info.sorok.map(s => {
             const t = store.itemOrStub(s.tetel_id);

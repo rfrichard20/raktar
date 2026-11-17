@@ -377,7 +377,7 @@ function tableHtml() {
   const list = filtered(db).sort((a, b) => compare(col[2](a), col[2](b)) * sd);
   const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id', emailek: 'sablon_id', cimkeivek: 'iv_id' }[ui.tab];
   // Mobilon kártyák: a „main” oszlop a kártya címe, a többi címkézett mező 3 oszlopba tördelve
-  return html`<table class="tbl cards nochk flow"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${sortArrow(c[0] === sk, sd)}</span></th>`)}</tr></thead>
+  return html`<table class="tbl cards flow"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${sortArrow(c[0] === sk, sd)}</span></th>`)}</tr></thead>
     <tbody>${list.length ? list.map(r => html`<tr class="click ${r.aktiv === false ? 'off' : ''}" data-id="${r[key]}" tabindex="0">${cols.map(c =>
       html`<td class="${c[4] === 'main' ? 'c-main' : c[4] || ''}" ${c[4] === 'main' ? '' : html`data-l="${c[1]}"`}>${c[3](r)}</td>`)}</tr>`)
       : html`<tr><td colspan="${cols.length}" class="empty">Nincs a szűrésnek megfelelő elem.</td></tr>`}</tbody></table>

@@ -467,7 +467,7 @@ export const movesLegend = (withTools = false) => html`<b>Anyag</b><br>${Object.
  */
 export function movesTable(moves, { withItem = false } = {}) {
   const extra = m => html`${m.atvevo || m.munka ? html`<div class="small">${[m.atvevo && `Átvevő: ${store.userName(m.atvevo)}`, m.munka && `Munka: ${m.munka}`].filter(Boolean).join(' · ')}</div>` : ''}${m.megjegyzes ? html`<div class="small muted">${m.megjegyzes}</div>` : ''}`;
-  return html`<table class="tbl cards nochk moves-tbl">
+  return html`<table class="tbl cards moves-tbl">
     <thead><tr><th class="c-ico"><span class="sr-only">Típus</span></th><th>Dátum</th>${withItem ? html`<th>Tétel</th>` : ''}<th>Bizonylat</th><th>Rögzítette</th><th class="num">Mennyiség</th></tr></thead>
     <tbody>${moves.map(m => {
       const t = store.itemOrStub(m.tetel_id);
@@ -609,19 +609,19 @@ export function showItemDetail(tetelId) {
       ${canEdit ? html`<button class="btn" data-d="edit">${ICONS.edit} Szerkesztés</button>` : ''}
     </div>` : ''}
     ${store.can('rendeles') ? html`<h3 class="sec-h">Beszerzési források</h3>
-    ${src.length ? html`<div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
+    ${src.length ? html`<div class="table-wrap"><table class="tbl small cards detail-tbl"><thead><tr><th>Beszállító</th><th>Cikkszám</th><th class="num">Kiszerelés</th>${store.can('arak') ? html`<th class="num">Egységár</th>` : ''}<th></th></tr></thead><tbody>
       ${src.map(f => html`<tr><td class="c-main">${store.supplierName(f.beszallito_id)} ${f.elsodleges ? html`<span class="star-on" title="Elsődleges forrás">${ICONS.star}</span>` : ''}</td>
         <td class="c-f1" data-l="Cikkszám">${f.cikkszam || '—'}</td><td class="num c-f2" data-l="Kiszerelés">${fmtNum(f.kiszereles)} ${me}</td>${store.can('arak') ? html`<td class="num c-f3" data-l="Egységár">${f.egysegar ? fmtMoney(f.egysegar) : '—'}</td>` : ''}
         <td class="c-act">${(u => u ? html`<a href="${u}" target="_blank" rel="noopener">Webshop ↗</a>` : '')(L.productUrl(store.get('Beszallitok', f.beszallito_id), f))}</td></tr>`)}
     </tbody></table></div>` : html`<p class="muted small">Nincs megadva beszerzési forrás.</p>`}` : ''}
     ${lines.length && store.can('rendeles') ? html`<h3 class="sec-h">Nyitott rendelések</h3>
-      <div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Rendelés</th><th>Beszállító</th><th class="num">Rendelt</th><th class="num">Megérkezett</th></tr></thead>
+      <div class="table-wrap"><table class="tbl small cards detail-tbl"><thead><tr><th>Rendelés</th><th>Beszállító</th><th class="num">Rendelt</th><th class="num">Megérkezett</th></tr></thead>
       <tbody>${lines.map(l => { const o = store.get('Rendelesek', l.rendeles_id) || {}; return html`<tr>
         <td class="c-main">${l.rendeles_id}${o.belso_azon ? html` <span class="muted">· ${o.belso_azon}</span>` : ''}<div class="sub">${fmtDate(o.datum)}</div></td>
         <td class="c-act">${store.supplierName(o.beszallito_id)}</td>
         <td class="num c-f1" data-l="Rendelt">${fmtNum(l.mennyiseg)} ${me}</td><td class="num c-f2" data-l="Megérkezett">${fmtNum(l.beerkezett)}</td></tr>`; })}</tbody></table></div>` : ''}
     ${tool ? html`<h3 class="sec-h">Eszközök ebből a típusból</h3>
-      ${units.length ? html`<div class="table-wrap"><table class="tbl small cards nochk detail-tbl"><thead><tr><th>Azonosító</th><th>Hol van</th><th>Állapot</th></tr></thead><tbody>
+      ${units.length ? html`<div class="table-wrap"><table class="tbl small cards detail-tbl"><thead><tr><th>Azonosító</th><th>Hol van</th><th>Állapot</th></tr></thead><tbody>
         ${units.map(e => html`<tr class="click" data-tool="${e.azonosito}"><td class="c-main"><b>${e.azonosito}</b>${e.gyari_szam ? html` <span class="muted small">${e.gyari_szam}</span>` : ''}</td>
           <td class="c-f1" data-l="Hol van">${where(ust[e.eszkoz_id])}</td><td class="c-f2" data-l="Állapot">${L.TOOL_STATE[e.allapot] || e.allapot}</td></tr>`)}
       </tbody></table></div>` : html`<p class="muted small">Még nincs ilyen eszköz felvéve.</p>`}`
