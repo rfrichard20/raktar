@@ -14,9 +14,11 @@ web/                 statikus webes alkalmazás (PWA), szerver nem kell hozzá
   js/backend.js      Apps Script kapcsolat / demo backend
   js/views/          képernyők (áttekintő, leltár, beérkezés, rendelés, törzsadatok, fiók)
   sw.js              service worker (offline indulás)
+  kozos/             KÖZÖS fájlok a Terep apppal (ui-mag, téma, helyi tár, alapstílusok, betűk) – forrás: Kozos_Claude
 apps-script/         a Google Sheethez kötött backend
-  Code.gs            API, bejelentkezés, Sheet olvasás/írás, telepítés, demo adatok
+  Code.gs            API, Sheet olvasás/írás, telepítés, demo adatok
   Logic.gs           = web/js/logic.js másolata (módosításkor mindkettőt frissítsd!)
+  Kozos.gs           KÖZÖS: bejelentkezés, munkamenet, adatverzió – forrás: Kozos_Claude
   appsscript.json
 serve.ps1            helyi webszerver teszteléshez
 ```
@@ -197,8 +199,8 @@ A projekt Git-repó: GitHub Desktopban Commit → Push origin, és a GitHub Acti
 A felületi elemek és segédfüggvények jegyzéke: [FEJLESZTES.md](FEJLESZTES.md) – új funkció előtt ebből kell dolgozni.
 
 ## Külső összetevők és licencek
-- **Poppins betűtípus** (`web/fonts/`): SIL Open Font License 1.1 – kereskedelmi célra is ingyenes,
-  a licencszöveget (`web/fonts/OFL.txt`) a fájlok mellett kell tartani. A betűk helyben vannak,
+- **Poppins betűtípus** (`web/kozos/fonts/`): SIL Open Font License 1.1 – kereskedelmi célra is ingyenes,
+  a licencszöveget (`web/kozos/fonts/OFL.txt`) a fájlok mellett kell tartani. A betűk helyben vannak,
   külső betűszolgáltatót (pl. Google Fonts) az app nem hív.
 - **Ikonok, logó** (`web/js/icons.js`, `web/icon*.{svg,png}`): saját rajzolású, egyszerű SVG alakzatok.
 - **Google Identity Services** (`accounts.google.com/gsi/client`): a bejelentkezéshez, a Google feltételei szerint

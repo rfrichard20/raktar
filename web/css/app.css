@@ -1,67 +1,4 @@
-/* ===== Betűtípus: Poppins (a realflex.hu arculata), saját mappából, hogy offline is működjön ===== */
-@font-face { font-family: Poppins; font-weight: 400; font-display: swap; src: url(../fonts/poppins-400-latin-ext.woff2) format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-@font-face { font-family: Poppins; font-weight: 400; font-display: swap; src: url(../fonts/poppins-400-latin.woff2) format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: Poppins; font-weight: 500; font-display: swap; src: url(../fonts/poppins-500-latin-ext.woff2) format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-@font-face { font-family: Poppins; font-weight: 500; font-display: swap; src: url(../fonts/poppins-500-latin.woff2) format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: Poppins; font-weight: 600; font-display: swap; src: url(../fonts/poppins-600-latin-ext.woff2) format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-@font-face { font-family: Poppins; font-weight: 600; font-display: swap; src: url(../fonts/poppins-600-latin.woff2) format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: Poppins; font-weight: 700; font-display: swap; src: url(../fonts/poppins-700-latin-ext.woff2) format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-@font-face { font-family: Poppins; font-weight: 700; font-display: swap; src: url(../fonts/poppins-700-latin.woff2) format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-
-/* ===== Tokenek ===== */
-/* Arculat: Realflex piros (--brand) csak akcentus; az elsődleges gomb grafit, mert a piros nálunk a hiba/törlés jele. */
-:root {
-  --bg: #e6e8ec;
-  --surface: #ffffff;
-  --surface-2: #eef0f3;
-  --border: #9aa1aa;
-  --text: #14171a;
-  --muted: #4a5059;
-  --brand: #ed1c24;
-  --accent: #b8353b;  /* fakított piros: csak apró jelzésekhez */
-  --brand-grey: #909090;
-  --primary: #3b3e43;
-  --primary-2: #25272b;
-  --primary-soft: #dcdfe4;
-  --on-primary: #ffffff;
-  --ok: #14633a;   --ok-soft: #cfeadb;
-  --warn: #7d4a00; --warn-soft: #fbe3b3;
-  --err: #9f1d12;  --err-soft: #f9cdc8;
-  --info: #17507a; --info-soft: #cfe2f1;
-  --caution: #d08a00;                        /* „fogyóban” jelölés (csík, pont, ikon) */
-  --star: #e0a100;                           /* elsődleges forrás csillaga */
-  --purple: #5a2f9f; --purple-soft: #e3d6f7; /* korrekció */
-  --chart: #2f5f8e;                          /* egysorozatos diagramok */
-  --shadow: 0 1px 2px rgba(16, 24, 40, .12), 0 2px 5px rgba(16, 24, 40, .14);
-  --radius: 10px;
-  --nav-w: 220px;
-  --top-h: 56px;
-  color-scheme: light;
-}
-/* Sötét mód: rendszerbeállítás szerint (Automatikus), vagy a Fiók oldalon választva (data-theme).
-   A két blokk tartalma szándékosan azonos (CSS-ben a médialekérdezés és az attribútum nem vonható össze). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme=light]) {
-    --bg: #0e0f11; --surface: #1f2226; --surface-2: #16181b; --border: #5b616a;
-    --text: #f4f5f7; --muted: #bcc1c8; --brand: #ff4d52; --accent: #d9777b; --brand-grey: #9a9a9a;
-    --primary: #e1e4e8; --primary-2: #f4f5f7; --primary-soft: #3a3e45; --on-primary: #15171a;
-    --ok: #74dca0; --ok-soft: #1c4a32; --warn: #f5bd62; --warn-soft: #55401a;
-    --err: #f69a90; --err-soft: #5a2820; --info: #7bb8e6; --info-soft: #214766;
-    --purple: #c7aef5; --purple-soft: #3c2d5c; --chart: #7fb2dc;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .6), 0 2px 5px rgba(0, 0, 0, .5);
-    color-scheme: dark;
-  }
-}
-:root[data-theme=dark] {
-  --bg: #0e0f11; --surface: #1f2226; --surface-2: #16181b; --border: #5b616a;
-  --text: #f4f5f7; --muted: #bcc1c8; --brand: #ff4d52; --accent: #d9777b; --brand-grey: #9a9a9a;
-  --primary: #e1e4e8; --primary-2: #f4f5f7; --primary-soft: #3a3e45; --on-primary: #15171a;
-  --ok: #74dca0; --ok-soft: #1c4a32; --warn: #f5bd62; --warn-soft: #55401a;
-  --err: #f69a90; --err-soft: #5a2820; --info: #7bb8e6; --info-soft: #214766;
-  --purple: #c7aef5; --purple-soft: #3c2d5c; --chart: #7fb2dc;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .6), 0 2px 5px rgba(0, 0, 0, .5);
-  color-scheme: dark;
-}
+/* A betűtípus, a színtokenek (világos / sötét) és az alapelemek a közös web/kozos/kozos.css-ben vannak (előbb töltődik be). */
 
 /* Állapotszínek egy helyen: az elem a --st változót kapja, a komponensek ezt használják
    (oldalcsík, jelmagyarázat, adatlap, sorjelölő). */
@@ -78,46 +15,6 @@
 .mv-ALLAPOT { --mv: var(--purple); --mv-soft: var(--purple-soft); }
 .mv-SELEJTEZES { --mv: var(--err); --mv-soft: var(--err-soft); }
 
-* { box-sizing: border-box; }
-html, body { margin: 0; }
-/* A görgetősáv helye mindig fenntartva → nem ugrik a fejléc, ha az oldal hosszabb lesz.
-   Betűméret: 14 px alap (sűrű üzleti felületeken bevett), minden rem ehhez igazodik.
-   Mobilon 15 px; a beviteli mezők ott 16 px-esek, különben az iPhone fókuszáláskor ránagyít. */
-html { scrollbar-gutter: stable; font-size: 14px; }
-@media (max-width: 699px) {
-  html { font-size: 15px; }
-  input, select, textarea { font-size: 16px !important; }
-}
-body {
-  font-family: Poppins, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  font-size: 1rem; line-height: 1.45; color: var(--text); background: var(--bg);
-  -webkit-text-size-adjust: 100%;
-  /* Általános szabály: a szóköz nélküli hosszú szöveg (e-mail-cím, link, cikkszám) ne lógjon ki a dobozából,
-     hanem ott törjön, ahol már nem fér el. Öröklődik, így minden elemre érvényes; ahol egy sorban kell
-     maradnia, ott a .nowrap / .ellipsis felülírja. */
-  overflow-wrap: break-word;
-}
-body.modal-open { overflow: hidden; }
-a { color: var(--primary); }
-h1 { font-size: 1.35rem; margin: 0; font-weight: 600; }
-h2 { font-size: 1.1rem; margin: 0; font-weight: 600; }
-h3 { font-size: 1rem; margin: 0 0 .5rem; font-weight: 600; }
-p { margin: 0 0 .75rem; }
-/* Segédosztályok */
-.muted { color: var(--muted); }
-.small { font-size: .875rem; }
-.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.nowrap { white-space: nowrap; }
-.grow { flex: 1; }
-.d-block { display: block; }
-.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Szövegszínek állapothoz (eltérés, hiba, rendben) */
-.t-warn { color: var(--warn); } .t-err { color: var(--err); } .t-ok { color: var(--ok); }
-/* Másodlagos sor egy cellán / címen belül (pl. kategória a tétel neve alatt) – sosem félkövér */
-.sub { display: block; font-size: .875rem; color: var(--muted); font-weight: 400; }
-.hidden, [hidden] { display: none !important; }
-/* Csak képernyőolvasónak (pl. ikonoszlop fejléce) */
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ===== Elrendezés ===== */
 .topbar {

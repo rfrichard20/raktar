@@ -48,27 +48,23 @@ ha a beépített nem tudja, amit kell (pl. a tételkereső, mert több mezőben 
 
 ## 3. Segédfüggvények (JS)
 
-### `web/js/ui.js` – általános felület
+### Közös elemek – `web/kozos/` (KÖZÖS fájlok, forrásuk a `..\Kozos_Claude` repó)
+Itt **nem szerkeszthetők**: módosítás a Kozos_Claude-ban, majd `Kozos_Claude\szinkron.ps1` (a másolatok első sora jelzi;
+kézzel átírt másolatnál a szkript megáll). A jegyzékük: `..\Kozos_Claude\FEJLESZTES.md`. Röviden:
+- `kozos/ui.js` (a `js/ui.js` újraexportálja, a nézetek onnan importálnak): `html`, `raw`, `esc`, `fmtNum`, `fmtDate`, `fmtTime`, `ymd`,
+  `norm`, `matcher`, `sortArrow`, `toast`, `modal`, `confirmDialog`, `suggestInput`, `formValues`, `sec`, `popover`, `closePopover`, `copyText`.
+- `kozos/idb.js` (`createStore`; a `js/idb.js` a `'raktar'` / `'raktar:'` példány), `kozos/theme.js` (`window.AppTheme`),
+  `kozos/kozos.css` (Poppins, színtokenek, alapelemek, segédosztályok), `apps-script/Kozos.gs` (bejelentkezés, munkamenet, adatverzió).
+
+### `web/js/ui.js` – a Raktár saját felületi segédei
 | Név | Mire |
 |---|---|
-| `html`, `raw(s)`, `esc(s)` | Biztonságos HTML sablon; nyers (megbízható) HTML; kézi escape. |
-| `fmtNum(n)`, `fmtMoney(n)` | Szám (max. 2 tizedes), pénz („12 345 Ft”), mindig ezres tagolással (1 234). Üres értékre „–”. Megjelenített számot mindig ezzel kell formázni. |
-| `fmtDate(iso, withTime?)`, `fmtTime(d)` | Dátum „2026.11.08.” (+ „14:05”); óra:perc. |
+| `fmtMoney(n)` | Pénz („12 345 Ft”), ezres tagolással. |
 | `dateStamp(d?)`, `todayInput()`, `dateInputToIso(v)` | Bizonylatszám-dátum `ÉÉÉÉHHNN`; dátummező értéke `ÉÉÉÉ-HH-NN`; dátummező → ISO (ma: pontos idő, máskor dél). |
 | `parseNum(v)` | Szövegből szám (vessző / szóköz is jó); hibára `NaN`. |
-| `norm(s)` | Kisbetűs, ékezet nélküli alak (kereséshez). |
-| `matcher(q)` | Kereső szűrő: `const m = matcher(keresés); lista.filter(x => m(\`${x.nev} ${x.kod}\`))` – minden szónak szerepelnie kell. |
-| `compare(a, b)`, `sortArrow(aktív, irány)` | Rendezés (szám számként, szöveg magyar ábécé szerint); fejléc ▲/▼ jel. |
-| `toast(szöveg, 'ok'|'error'|'warn'|'info')` | Rövid értesítés alul. |
-| `modal({ title, body, actions, wide, onMount })` | Felugró ablak. `actions: [{ label, kind, value } | { label, kind, onClick: async el => … }]`. Az `onClick` `false`-ra nyitva marad (hiba), egyéb értékkel bezár. Beépítve: dupla kattintás elleni védelem, módosított űrlapnál bezárás előtti megerősítés, Esc, háttérkattintás. |
-| `confirmDialog(cím, szöveg, gomb, 'primary'|'danger')` | Igen/nem kérdés → `Promise<boolean>`. |
-| `suggestInput(name, érték, értékek, ph)` | Szabad szöveges mező javaslatlistával (lásd 2. pont). |
-| `formValues(root)` | Űrlap `name` mezői objektumba (checkbox: bool, radio: a kijelölt érték). |
-| `sec(cím, tartalom, 'grid'|'col')` | Űrlap szakasz címmel (`.fsec`). |
+| `compare(a, b)` | Rendezés (szám számként, szöveg magyar ábécé szerint). |
 | `help(szöveg)` | „?” súgó ikon (rámutatásra / koppintásra). Jelmagyarázat, magyarázat ide kerüljön, ne a felületre. |
-| `popover(horgony, tartalom, { onMount, minWidth })` | Elemhez kötött legördülő panel (újrakattintásra zár). Alá nyílik, ha nem fér: fölé; ha egyik irányba sem, a nagyobbik oldalra, a képernyőhöz (és mobilon az alsó menüsávhoz) igazított, görgethető magassággal. A `.pop-foot` gombsor az alján ragad. |
 | `keepFocusInPlace(fn)` (`app.js`) | Háttérfrissítés (szinkron, menü, szinkronjelző) közben a fókuszban lévő beviteli mező a képernyőn a helyén marad (pl. leltározáskor ne ugorjon a ragadós fejléc alá). |
-| `copyText(szöveg)` | Vágólapra + értesítés. |
 | `STATUS_TEXT`, `ORDER_STATUS` | Készletállapot szövegei; rendelésállapot `[felirat, badge-szín]`. |
 | `igenyStatus(statusz)` | Igény állapota `[felirat, badge-szín]` (feliratok: `L.IGENY_STATUS`). |
 | `isoToInput(iso)` | ISO dátum → `<input type=date>` értéke (helyi idő szerint); üresre üres. |

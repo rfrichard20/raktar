@@ -91,7 +91,7 @@ export default {
         <p class="small muted">Az Automatikus az eszközöd világos/sötét beállítását követi. A választás csak ezen az eszközön érvényes.</p>
         <div class="chip-list" id="theme-opts">
           ${[['auto', 'Automatikus'], ['light', 'Világos'], ['dark', 'Sötét']].map(([v, l]) => html`
-            <button class="chip ${window.RaktarTheme.get() === v ? 'on' : ''}" data-a="theme" data-v="${v}">${l}</button>`)}
+            <button class="chip ${window.AppTheme.get() === v ? 'on' : ''}" data-a="theme" data-v="${v}">${l}</button>`)}
         </div>
         <label class="check" style="margin-top:.75rem"><input type="checkbox" data-a="help" ${store.getPref('help', true) ? 'checked' : ''}>
           Súgó ikonok (?) megjelenítése</label>
@@ -162,7 +162,7 @@ export default {
       }
       if (a === 'navreset') store.setNavOrder(null);
       if (a === 'theme') {
-        window.RaktarTheme.set(b.dataset.v);
+        window.AppTheme.set(b.dataset.v);
         root.querySelectorAll('[data-a=theme]').forEach(x => x.classList.toggle('on', x === b));
       }
       if (a === 'logout' || a === 'switch') {

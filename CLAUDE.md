@@ -5,6 +5,9 @@
   azt használd. Ha mégis újat kell írni, vedd fel a jegyzékbe ugyanabban a változtatásban.
 - Fejlesztés a helyi demóban (`.claude/launch.json` → „raktar”, http://localhost:8080, demo mód); az élesítést a
   felhasználó végzi. Minden változtatást asztali és mobil (375 px) nézetben is ellenőrizni kell.
+- **Közös kód:** a `web/kozos/` mappa és az `apps-script/Kozos.gs` a Terep apppal közös, forrásuk a `..\Kozos_Claude` repó –
+  **itt nem szerkeszthetők**. Módosítás a Kozos_Claude-ban, majd `Kozos_Claude\szinkron.ps1`, és mindkét appban kipróbálni.
+  Új, app-független segédet / stílust is oda kell tenni (jegyzék: `..\Kozos_Claude\FEJLESZTES.md`).
 - `web/js/logic.js` változásakor az `apps-script/Logic.gs` legyen vele azonos; `web/` változásakor `web/sw.js` `VERSION` +1.
 - Az `apps-script/Code.gs`-ben a `GOOGLE_CLIENT_ID` a repóban üres marad (a felhasználó tölti ki).
 - PowerShell 5.1: fájlírásnál BOM nélküli UTF-8 (`[IO.File]::WriteAllText(..., (New-Object Text.UTF8Encoding $false))`),

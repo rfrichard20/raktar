@@ -20,6 +20,7 @@ Kb. 30–45 perc. Három rész:
 4. **Fájlok bemásolása:**
    - A meglévő `Kód.gs` (vagy `Code.gs`) teljes tartalmát cseréld le az `apps-script/Code.gs` tartalmára.
    - A bal oldali **+ → Szkript** gombbal hozz létre egy `Logic` nevű fájlt, és másold bele az `apps-script/Logic.gs` tartalmát.
+   - Ugyanígy egy `Kozos` nevű fájlt az `apps-script/Kozos.gs` tartalmával (bejelentkezés, munkamenet – a Terep apppal közös kód).
    - **Projektbeállítások** (fogaskerék): kapcsold be „Az appsscript.json jegyzékfájl megjelenítése a szerkesztőben” opciót. Utána a szerkesztőben az `appsscript.json` tartalmát cseréld le a repó `apps-script/appsscript.json` tartalmára.
    - Mentés (Ctrl+S).
 5. **Első futtatás:**
@@ -65,7 +66,7 @@ Kb. 30–45 perc. Három rész:
 > Ha a „Bárki” opció nem választható, a céges Google Workspace admin tiltja. Ilyenkor az adminnak kell
 > engedélyeznie, vagy a táblázatot egy másik (pl. erre a célra létrehozott) fiókban kell létrehozni.
 
-**A `Code.gs` minden későbbi módosítása után:** Telepítés → Telepítések kezelése → ceruza → Verzió: **Új verzió** → Telepítés. Az URL nem változik.
+**A `Code.gs` / `Logic.gs` / `Kozos.gs` minden későbbi módosítása után** (a fájl tartalmának cseréje után): Telepítés → Telepítések kezelése → ceruza → Verzió: **Új verzió** → Telepítés. Az URL nem változik.
 
 ## 4. Webes felület (GitHub Pages)
 
