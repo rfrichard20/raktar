@@ -346,9 +346,16 @@ export const recentValues = (rows, field, dateField) => [...new Set((rows || [])
 export const shelves = () => [...new Set(state.db.Tetelek.map(t => t.polc).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));
 /** Hely felirat: „Raktár · Polc” (ami ki van töltve). */
 export const placeLabel = t => [t.raktar, t.polc].filter(Boolean).join(' · ') || '—';
-/** Tételek bejárási sorrendje: raktár, polc, név (a hely nélküliek a végén) – leltár, tételválasztó. */
-export const byPlace = (a, b) => (a.raktar || '~').localeCompare(b.raktar || '~', 'hu') ||
-  (a.polc || '~').localeCompare(b.polc || '~', 'hu') || a.megnevezes.localeCompare(b.megnevezes, 'hu');
+/**
+ * Tételek bejárási sorrendje: raktár, polc (természetes számsorrend: A0, A1 … A10), a polcon belül a beállított
+ * sorszám (polc_sorrend; a sorszám nélküliek a végén), végül név – leltár, tételválasztó, címkék, Anyagkészlet.
+ */
+const seq = t => Number(t.polc_sorrend) || 1e9;
+// A hely nélküliek a végén (üres raktár / polc: a betűk után)
+const lastIfEmpty = (x, y) => (!x === !y ? 0 : x ? -1 : 1);
+export const byPlace = (a, b) => lastIfEmpty(a.raktar, b.raktar) || (a.raktar || '').localeCompare(b.raktar || '', 'hu') ||
+  lastIfEmpty(a.polc, b.polc) || (a.polc || '').localeCompare(b.polc || '', 'hu', { numeric: true }) || seq(a) - seq(b) ||
+  a.megnevezes.localeCompare(b.megnevezes, 'hu');
 /** Új választólista-elem sorszáma: a típus legnagyobb sorszáma + 1 (törlés után sem ütközik). */
 export const nextListOrder = tipus => Math.max(0, ...(state.db.Listak || []).filter(l => l.tipus === tipus).map(l => Number(l.sorrend) || 0)) + 1;
 export const categories = () => [...new Set(state.db.Tetelek.map(t => t.kategoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu'));

@@ -1,0 +1,6 @@
+# Egységes sorvég (LF) a repóban, különben Windowson minden fájl „módosultnak” látszik
+* text=auto eol=lf
+*.png binary
+*.pdf binary
+*.wasm binary
+*.woff2 binary

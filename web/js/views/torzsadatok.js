@@ -3,13 +3,14 @@ import * as store from '../store.js';
 import { html, fmtNum, fmtMoney, fmtDate, matcher, compare, sortArrow, modal, toast, formValues, parseNum, help, sec, confirmDialog, suggestInput } from '../ui.js';
 import { itemSelector, tplIds, listSelect, bindListSelects, filterButton, openFilter, inSel, countOptions } from './common.js';
 import { ICONS } from '../icons.js';
+import { sheetPreview } from './cimkek.js';
 
 const L = window.RaktarLogic;
 const ui = {
   tab: 'tetelek', q: '',
   // Szűrők (filterButton): üres = mind; „egyeb” → 'inaktiv': az inaktívak is látszanak
   f: { kat: new Set(), wh: new Set(), sup: new Set(), mod: new Set(), role: new Set(), egyeb: new Set(), kesz: new Set() },
-  sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1], emailek: ['nev', 1] },
+  sort: { tetelek: ['megnevezes', 1], beszallitok: ['nev', 1], felhasznalok: ['nev', 1], sablonok: ['nev', 1], emailek: ['nev', 1], cimkeivek: ['nev', 1] },
 };
 
 const CYCLES = [[0, 'nincs'], [30, '30 nap (havonta)'], [60, '60 nap'], [90, '90 nap (negyedévente)'], [180, '180 nap (félévente)'], [365, '365 nap (évente)']];
@@ -55,7 +56,9 @@ export function editItem(t, pre = {}) {
         <label class="field"><span>Mértékegység</span>${listSelect('mertekegyseg', 'mertekegyseg', t.mertekegyseg, { defaultFirst: isNew })}</label>`)}
       ${sec('Tárolás', html`
         <label class="field"><span>Raktár</span>${listSelect('raktar', 'raktar', t.raktar)}</label>
-        <label class="field"><span>Polc / hely</span>${suggestInput('polc', t.polc, store.shelves(), 'pl. A1')}</label>`)}
+        <label class="field"><span>Polc / hely</span>${suggestInput('polc', t.polc, store.shelves(), 'pl. A1')}</label>
+        <label class="field"><span>Sorszám a polcon ${help('A tétel helye a polcon (bejárási sorrend): a leltár és az Anyagkészlet így listázza. Kényelmesebb a leltár „Sorrend” gombjával, nyilakkal beállítani.')}</span>
+          <input name="polc_sorrend" inputmode="numeric" value="${Number(t.polc_sorrend) || ''}" placeholder="–"></label>`)}
       ${sec('Készletszint és leltár', html`
         <label class="field"><span>Minimum készlet</span><input name="min_keszlet" inputmode="decimal" value="${numVal(isNew, t.min_keszlet)}" placeholder="0"></label>
         <label class="field"><span>Célkészlet (eddig pótolunk)</span><input name="cel_keszlet" inputmode="decimal" value="${numVal(isNew, t.cel_keszlet)}" placeholder="0"></label>
@@ -75,7 +78,8 @@ export function editItem(t, pre = {}) {
         const v = formValues(el.querySelector('[data-main]'));
         const toTool = v.keszletezes === 'eszkoz';
         const row = { ...t, ...v, mertekegyseg: v.mertekegyseg || 'db', raktar: v.raktar || (isNew ? store.warehouses()[0] || '' : ''),
-          min_keszlet: parseNum(v.min_keszlet) || 0, cel_keszlet: parseNum(v.cel_keszlet) || 0, leltar_ciklus_nap: toTool ? 0 : Number(v.leltar_ciklus_nap) || 0 };
+          min_keszlet: parseNum(v.min_keszlet) || 0, cel_keszlet: parseNum(v.cel_keszlet) || 0, leltar_ciklus_nap: toTool ? 0 : Number(v.leltar_ciklus_nap) || 0,
+          polc_sorrend: Math.max(0, Math.round(parseNum(v.polc_sorrend) || 0)) };
         // Anyagból eszköztípus: a mozgásokból számolt készlet helyett a darabok száma számít
         if (!isNew && toTool && !tool && db.Mozgasok.some(x => x.tetel_id === t.tetel_id) &&
           !(await confirmDialog('Eszköztípussá alakítás', 'Ennek a tételnek vannak készletmozgásai. Eszköztípusként a készlete a hozzá rögzített egyedi eszközök száma lesz (a mozgások megmaradnak, de nem számítanak). Folytatod?', 'Átalakítás'))) return false;
@@ -152,6 +156,67 @@ function editSupplier(b) {
       },
     }],
   });
+}
+
+/* ---------- Címkeív szerkesztő ---------- */
+const SHEET_FIELDS = [['lap_sz', 'Lap szélesség'], ['lap_m', 'Lap magasság'], ['oszlop', 'Oszlop (db)'], ['sor', 'Sor (db)'],
+  ['cimke_sz', 'Címke szélesség'], ['cimke_m', 'Címke magasság'], ['felso', 'Felső margó'], ['bal', 'Bal margó'],
+  ['hezag_v', 'Vízszintes hézag'], ['hezag_f', 'Függőleges hézag']];
+/** Címkeív felvétele / módosítása / másolása, élő előnézettel. copy: a megadott ív másolata új ívként. */
+function editLabelSheet(s, { copy = false } = {}) {
+  const isNew = !s || copy;
+  // Új ív: A4-es lap, a többi méret a papír szerint töltendő (az első ív alapértelmezett lesz)
+  const first = !(store.state.db.Cimkeivek || []).length;
+  const base = s || { lap_sz: 210, lap_m: 297, oszlop: '', sor: '', cimke_sz: '', cimke_m: '', felso: 0, bal: 0, hezag_v: 0, hezag_f: 0, aktiv: true, alap: first, nev: '', megjegyzes: '' };
+  const v0 = { ...base, iv_id: isNew ? L.newId('L', 6) : base.iv_id, nev: copy ? `${base.nev} (másolat)` : base.nev, alap: copy ? false : base.alap };
+  const read = el => {
+    const f = formValues(el);
+    const r = { ...v0, nev: f.nev.trim(), megjegyzes: f.megjegyzes, aktiv: f.aktiv, alap: f.alap };
+    SHEET_FIELDS.forEach(([k]) => { const n = parseNum(f[k]); r[k] = isNaN(n) ? NaN : n; });
+    return r;
+  };
+  const m = modal({
+    title: isNew ? 'Új címkeív' : v0.nev,
+    wide: true,
+    body: html`
+      ${sec('Ív', html`
+        <label class="field span-2"><span>Név *</span><input name="nev" value="${v0.nev}" placeholder="pl. Avery LCV11368 – 70 × 35 mm"></label>
+        <label class="field span-2"><span>Megjegyzés</span><input name="megjegyzes" value="${v0.megjegyzes}" placeholder="pl. hol kapható, cikkszám"></label>
+        <label class="check"><input type="checkbox" name="aktiv" ${v0.aktiv !== false ? 'checked' : ''}> Aktív (választható)</label>
+        <label class="check"><input type="checkbox" name="alap" ${v0.alap ? 'checked' : ''}> Alapértelmezett</label>`)}
+      <section class="fsec"><div class="fsec-title">Méretek (mm) ${help(html`A gyártó adatlapja vagy a csomagolás szerint. <b>Ív:</b> a lap A4 (210 × 297). <b>Szalagos nyomtató:</b> a lap maga a címke (pl. 62 × 29), 1 oszlop × 1 sor, margó és hézag 0 – a nyomtató beállításaiban is ugyanezt a papírméretet kell választani.<br><br>Margó: a lap szélétől az első címkéig; hézag: két címke között.`)}</div>
+        <div class="sheet-edit">
+          <div class="form-grid">${SHEET_FIELDS.map(([k, l]) => html`<label class="field"><span>${l}</span><input name="${k}" inputmode="decimal" value="${String(v0[k]).replace('.', ',')}"></label>`)}</div>
+          <div><div class="small muted" style="text-align:center;margin-bottom:.25rem">Előnézet</div><div data-prev>${sheetPreview(v0)}</div>
+            <div class="small" data-err style="text-align:center;margin-top:.35rem"></div></div>
+        </div></section>`,
+    onMount: el => {
+      const upd = () => {
+        const r = read(el), err = L.sheetError(r);
+        el.querySelector('[data-prev]').innerHTML = String(sheetPreview(r));
+        const e = el.querySelector('[data-err]');
+        e.textContent = err || `${r.oszlop * r.sor} címke / lap`;
+        e.className = `small ${err ? 't-err' : 'muted'}`;
+      };
+      el.addEventListener('input', upd);
+      upd();
+    },
+    actions: [
+      { label: 'Mégse', value: null },
+      ...(isNew ? [] : [{ label: 'Törlés', kind: 'danger', onClick: async () => {
+        if (!(await confirmDialog('Címkeív törlése', `Biztosan törlöd: „${v0.nev}”?`, 'Törlés', 'danger'))) return false;
+        try { await store.enqueue({ type: 'torles', table: 'Cimkeivek', id: v0.iv_id }); toast('Törölve', 'ok'); }
+        catch (x) { toast(x.message, 'error'); return false; }
+      } }, { label: 'Másolat…', value: 'copy' }]),
+      { label: 'Mentés', kind: 'primary', onClick: async el => {
+        const r = read(el), err = L.sheetError(r);
+        if (err) { toast(err, 'error', 6000); return false; }
+        try { await store.enqueue({ type: 'mentes', table: 'Cimkeivek', row: r }); toast('Mentve', 'ok'); }
+        catch (x) { toast(x.message, 'error', 6000); return false; }
+      } },
+    ],
+  });
+  m.done.then(v => { if (v === 'copy') editLabelSheet(v0, { copy: true }); });
 }
 
 /* ---------- E-mail sablon szerkesztő ---------- */
@@ -258,6 +323,12 @@ function columns(db) {
       ['targy', 'Tárgy', s => s.targy, s => s.targy, 'c-wide'],
       ['hasznalja', 'Beszállítók', s => db.Beszallitok.filter(b => b.email_sablon === s.sablon_id).length, s => db.Beszallitok.filter(b => b.email_sablon === s.sablon_id).length || '–', 'num'],
     ],
+    cimkeivek: [
+      ['nev', 'Név', s => s.nev, s => html`${s.nev}${s.alap ? html` <span class="badge badge-info">alapértelmezett</span>` : ''}`, 'main'],
+      ['lap', 'Lap', s => s.lap_sz * 1000 + s.lap_m, s => `${fmtNum(s.lap_sz)} × ${fmtNum(s.lap_m)} mm`],
+      ['cimke', 'Címke', s => s.cimke_sz * 1000 + s.cimke_m, s => `${fmtNum(s.cimke_sz)} × ${fmtNum(s.cimke_m)} mm`],
+      ['db', 'Címke / lap', s => s.oszlop * s.sor, s => `${s.oszlop} × ${s.sor} = ${s.oszlop * s.sor}`, 'num'],
+    ],
     sablonok: [
       ['nev', 'Név', s => s.nev, s => s.nev, 'main'],
       ['db', 'Tételek', s => tplIds(s).length, s => tplIds(s).length, 'num'],
@@ -292,6 +363,8 @@ function filtered(db) {
   }
   if (ui.tab === 'sablonok') return (db.Leltar_sablonok || []).filter(s => match(s.nev));
   if (ui.tab === 'emailek') return (db.Email_sablonok || []).filter(s => match(`${s.nev} ${s.targy}`));
+  // Címkeívek: mind látszik (az inaktív halványan) – kevés van belőlük, szűrő nem kell
+  if (ui.tab === 'cimkeivek') return (db.Cimkeivek || []).filter(s => match(`${s.nev} ${s.megjegyzes}`));
   return db.Felhasznalok.filter(u => (inactive || u.aktiv) && match(`${u.nev} ${u.email}`)).filter(u => inSel(f.role, u.szerepkor));
 }
 
@@ -302,7 +375,7 @@ function tableHtml() {
   const [sk, sd] = ui.sort[ui.tab];
   const col = cols.find(c => c[0] === sk) || cols[0];
   const list = filtered(db).sort((a, b) => compare(col[2](a), col[2](b)) * sd);
-  const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id', emailek: 'sablon_id' }[ui.tab];
+  const key = { tetelek: 'tetel_id', beszallitok: 'beszallito_id', felhasznalok: 'email', sablonok: 'sablon_id', emailek: 'sablon_id', cimkeivek: 'iv_id' }[ui.tab];
   // Mobilon kártyák: a „main” oszlop a kártya címe, a többi címkézett mező 3 oszlopba tördelve
   return html`<table class="tbl cards nochk flow"><thead><tr>${cols.map(c => html`<th class="sortable ${c[4] === 'num' ? 'num' : ''} ${c[4] === 'm-hide' ? 'm-hide' : ''}" data-sort="${c[0]}">${c[1]}<span class="arrow">${sortArrow(c[0] === sk, sd)}</span></th>`)}</tr></thead>
     <tbody>${list.length ? list.map(r => html`<tr class="click ${r.aktiv === false ? 'off' : ''}" data-id="${r[key]}" tabindex="0">${cols.map(c =>
@@ -407,11 +480,11 @@ export default {
   render(root, params, ctx) {
     // Admin: minden fül; raktáros: csak a leltársablonok
     const isAdmin = store.can('admin');
-    const allLabels = { tetelek: 'Tételek', beszallitok: 'Beszállítók', listak: 'Listák', sablonok: 'Leltársablonok', emailek: 'E-mail sablonok', felhasznalok: 'Felhasználók' };
+    const allLabels = { tetelek: 'Tételek', beszallitok: 'Beszállítók', listak: 'Listák', sablonok: 'Leltársablonok', emailek: 'E-mail sablonok', cimkeivek: 'Címkeívek', felhasznalok: 'Felhasználók' };
     const labels = isAdmin ? allLabels : { sablonok: allLabels.sablonok };
     if (params.tab && labels[params.tab]) { ui.tab = params.tab; delete params.tab; history.replaceState(null, '', '#/torzsadatok'); }
     if (!labels[ui.tab]) ui.tab = Object.keys(labels)[0];
-    const newLabel = { tetelek: '+ Új tétel', beszallitok: '+ Új beszállító', felhasznalok: '+ Új felhasználó', sablonok: '+ Új sablon', emailek: '+ Új e-mail sablon' };
+    const newLabel = { tetelek: '+ Új tétel', beszallitok: '+ Új beszállító', felhasznalok: '+ Új felhasználó', sablonok: '+ Új sablon', emailek: '+ Új e-mail sablon', cimkeivek: '+ Új címkeív' };
     const refresh = () => { root.querySelector('#tbl').innerHTML = String(tableHtml()); };
     const openTpl = tpl => itemSelector({ mode: 'template', tpl });
     // Megj.: a gyökéren nem lehet data-tab attribútum, mert a kattintáskezelő a [data-tab]-ot keresi
@@ -451,7 +524,9 @@ export default {
       <div class="toolbar"><input type="search" id="q" placeholder="Keresés…" value="${ui.q}">
         ${ui.tab === 'sablonok' ? help('A leltársablon egy elmentett tételösszeállítás. A Leltár oldalon az „Egyedi / sablon” kártyáról egy kattintással indítható. Mindenki számára elérhető.')
           : ui.tab === 'emailek' ? help('A megrendelő és ajánlatkérő e-mailek sablonjai. A beszállítónál beállítható, melyik legyen az alapértelmezett (pl. tegező viszony). Küldéskor a sablon kitöltve, szerkeszthetően jelenik meg.')
+          : ui.tab === 'cimkeivek' ? help('A QR-címkék nyomtatásához használható ívek (A4-es címkeív vagy szalagos címkenyomtató): a lap és a címke mérete, elrendezése. A címkenyomtató ablakban ezek közül lehet választani; az alapértelmezett ív előre ki van választva.')
           : filterButton(ui.f)}</div>
+      ${ui.tab === 'cimkeivek' && !(store.state.db.Cimkeivek || []).length ? html`<div class="notice notice-info small">Még nincs címkeív – a QR-címkék nyomtatásához vedd fel a használt címkepapírt (a méretek a csomagoláson vagy a gyártó oldalán).</div>` : ''}
       ${ui.tab === 'felhasznalok' && store.isDemo ? html`<div class="notice notice-info small">Éles használatban a felhasználó a megadott Google-fiókkal tud belépni.</div>` : ''}
       ${ui.tab === 'emailek' && !(store.state.db.Email_sablonok || []).length ? html`<div class="notice notice-info small">Még nincs saját sablon – küldéskor a beépített alapsablonok (hivatalos, tegező, ajánlatkérés) használhatók.
         <button class="btn btn-sm" data-a="seedmail" style="margin-left:.5rem">Alapsablonok felvétele szerkesztéshez</button></div>` : ''}
@@ -484,6 +559,7 @@ export default {
         return;
       }
       if (e.target.closest('[data-a="new"]')) {
+        if (ui.tab === 'cimkeivek') return editLabelSheet(null);
         if (ui.tab === 'tetelek') editItem(null);
         else if (ui.tab === 'beszallitok') editSupplier(null);
         else if (ui.tab === 'sablonok') openTpl(null);
@@ -493,6 +569,7 @@ export default {
       }
       const tr = e.target.closest('tr[data-id]');
       if (!tr) return;
+      if (ui.tab === 'cimkeivek') return editLabelSheet(store.get('Cimkeivek', tr.dataset.id));
       if (ui.tab === 'tetelek') editItem(store.get('Tetelek', tr.dataset.id));
       else if (ui.tab === 'beszallitok') editSupplier(store.get('Beszallitok', tr.dataset.id));
       else if (ui.tab === 'sablonok') openTpl(store.get('Leltar_sablonok', tr.dataset.id));

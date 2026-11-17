@@ -9,8 +9,8 @@ var RaktarLogic = (function () {
   var ROLES = { olvaso: 1, szerelo: 2, raktaros: 3, admin: 4 };
   var ROLE_LABELS = { admin: 'Admin', raktaros: 'Raktáros', szerelo: 'Szerelő', olvaso: 'Olvasó' };
   var MOVE_TYPES = { LELTAR: 'Leltár', BEERKEZES: 'Beérkezés', KIVET: 'Kivét', KORREKCIO: 'Korrekció' };
-  var EDITABLE = { Tetelek: 1, Beszallitok: 1, Forrasok: 1, Felhasznalok: 1, Listak: 1, Email_sablonok: 1 };
-  var DELETABLE = { Forrasok: 1, Listak: 1, Email_sablonok: 1 };
+  var EDITABLE = { Tetelek: 1, Beszallitok: 1, Forrasok: 1, Felhasznalok: 1, Listak: 1, Email_sablonok: 1, Cimkeivek: 1 };
+  var DELETABLE = { Forrasok: 1, Listak: 1, Email_sablonok: 1, Cimkeivek: 1 };
   var LIST_TYPES = { kategoria: 'Kategóriák', mertekegyseg: 'Mértékegységek', raktar: 'Raktárak' };
   var LIST_FIELD = { kategoria: 'kategoria', mertekegyseg: 'mertekegyseg', raktar: 'raktar' };
 
@@ -21,7 +21,9 @@ var RaktarLogic = (function () {
       ['polc', 'str'], ['min_keszlet', 'num'], ['cel_keszlet', 'num'], ['leltar_ciklus_nap', 'num'],
       ['aktiv', 'bool'], ['megjegyzes', 'str'], ['modositva', 'date'], ['raktar', 'str'],
       // Készletezés módja: '' / 'anyag' = mennyiségi (fogyóanyag); 'eszkoz' = eszköztípus, egyedi darabokkal (Eszkozok.tetel_id)
-      ['keszletezes', 'str']] },
+      ['keszletezes', 'str'],
+      // Sorszám a polcon (bejárási sorrend a polcon belül; 0 = nincs megadva → a végén, név szerint)
+      ['polc_sorrend', 'num']] },
     // rendeles_mod: 'webshop' | 'email'; kereso_url: webshop keresés, a {cikkszam} helyére kerül a cikkszám
     Beszallitok: { key: 'beszallito_id', cols: [
       ['beszallito_id', 'str'], ['nev', 'str'], ['kapcsolattarto', 'str'], ['email', 'str'],
@@ -77,6 +79,12 @@ var RaktarLogic = (function () {
       ['allapot', 'str'], ['tetel_id', 'str'], ['megjegyzes', 'str'], ['modositva', 'date'],
       // Tárolási hely (ahová visszakerül, ha bent van) – ugyanazok a raktárak / polcok, mint a tételeknél
       ['raktar', 'str'], ['polc', 'str']] },
+    // Címkeívek (QR-címkék nyomtatása): a lap mérete (A4 ív, vagy szalagos nyomtatónál maga a címke), oszlop × sor,
+    // a címke mérete, a felső / bal margó és a hézagok – mind mm-ben. alap: az alapértelmezett ív (egy lehet).
+    Cimkeivek: { key: 'iv_id', cols: [
+      ['iv_id', 'str'], ['nev', 'str'], ['lap_sz', 'num'], ['lap_m', 'num'], ['oszlop', 'num'], ['sor', 'num'],
+      ['cimke_sz', 'num'], ['cimke_m', 'num'], ['felso', 'num'], ['bal', 'num'], ['hezag_v', 'num'], ['hezag_f', 'num'],
+      ['aktiv', 'bool'], ['alap', 'bool'], ['megjegyzes', 'str'], ['modositva', 'date']] },
     // Átadás-átvételi aláírások (SVG vonalrajz). Nem része a letöltött adatnak (méret): kérésre jön le (alairas művelet).
     Alairasok: { key: 'alairas_id', cols: [
       ['alairas_id', 'str'], ['bizonylat', 'str'], ['nev', 'str'], ['rajz', 'long'], ['felhasznalo', 'str'], ['rogzitve', 'date'],
@@ -320,6 +328,7 @@ var RaktarLogic = (function () {
         need(user, 'raktaros');
         remove(db, 'Leltar_sablonok', op.sablon_id, changes);
         break;
+      case 'polc_sorrend': opPolcSorrend(db, op, user, nowIso, changes); break;
       case 'igeny': opIgeny(db, op, user, nowIso, changes); break;
       case 'igeny_kezeles': opIgenyKezeles(db, op, user, nowIso, changes); break;
       case 'igeny_torles': opIgenyTorles(db, op, user, changes); break;
@@ -481,6 +490,21 @@ var RaktarLogic = (function () {
         allapot: r.allapot, megjegyzes: r.megjegyzes, bizonylat: op.bizonylat };
     });
     opMozgasok(db, { rows: rows, bizonylat: op.bizonylat, alairasok: op.alairasok, alairas: op.alairas }, user, now, changes);
+  }
+
+  /** Polcon belüli sorrend (a leltár „Sorrend” módja): tételenként csak a sorszám – raktáros is állíthatja. */
+  function opPolcSorrend(db, op, user, now, changes) {
+    need(user, 'raktaros');
+    var rows = rowsOf(op.rows, 'Nincs rendezendő tétel.');
+    rows.forEach(function (r) {
+      var t = get(db, 'Tetelek', String(r.tetel_id));
+      if (!t) fail('Ismeretlen tétel.');
+      var n = toNum(r.polc_sorrend);
+      if (n < 0 || n > 100000 || Math.floor(n) !== n) fail('Érvénytelen sorszám.');
+    });
+    rows.forEach(function (r) {
+      put(db, 'Tetelek', { tetel_id: String(r.tetel_id), polc_sorrend: toNum(r.polc_sorrend), modositva: now }, changes);
+    });
   }
 
   /* ---------- Igények ---------- */
@@ -760,6 +784,9 @@ var RaktarLogic = (function () {
         return x.tipus === r.tipus && x.lista_id !== r.lista_id && String(x.ertek).toLowerCase() === r.ertek.toLowerCase();
       });
       if (dupL) fail('Ez az érték már szerepel a listában: ' + r.ertek);
+    } else if (table === 'Cimkeivek') {
+      var sheetErr = sheetError(r);
+      if (sheetErr) fail(sheetErr);
     } else if (table === 'Felhasznalok') {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email)) fail('Érvénytelen e-mail-cím.');
       if (!own(ROLES, r.szerepkor)) fail('Érvénytelen szerepkör.');
@@ -769,6 +796,12 @@ var RaktarLogic = (function () {
     }
     if ('modositva' in r) r.modositva = now;
     put(db, table, r, changes);
+    // Egy alapértelmezett címkeív lehet: az új alapértelmezett mellett a többi nem az
+    if (table === 'Cimkeivek' && r.alap) {
+      (db.Cimkeivek || []).forEach(function (s) {
+        if (s.iv_id !== r.iv_id && s.alap) put(db, 'Cimkeivek', { iv_id: s.iv_id, alap: false, modositva: now }, changes);
+      });
+    }
     if (table === 'Forrasok' && r.elsodleges) {
       (db.Forrasok || []).forEach(function (f) {
         if (f.tetel_id === r.tetel_id && f.forras_id !== r.forras_id && f.elsodleges) {
@@ -1050,6 +1083,20 @@ var RaktarLogic = (function () {
       if (m.datum > w.datum) w.datum = m.datum;
     });
     return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return a.datum < b.datum ? 1 : -1; });
+  }
+
+  /* ---------- Címkeívek ---------- */
+  /** Az ív méreteinek ellenőrzése (a lapon elfér-e). Hibaüzenet vagy ''. Az ívek csak az adatbázisban vannak (Cimkeivek). */
+  function sheetError(s) {
+    if (!s.nev) return 'Az ív neve kötelező.';
+    var nums = ['lap_sz', 'lap_m', 'oszlop', 'sor', 'cimke_sz', 'cimke_m', 'felso', 'bal', 'hezag_v', 'hezag_f'];
+    for (var i = 0; i < nums.length; i++) if (!(toNum(s[nums[i]]) >= 0) || toNum(s[nums[i]]) > 1000) return 'Hibás méret.';
+    if (s.oszlop < 1 || s.sor < 1 || s.oszlop > 20 || s.sor > 40 || Math.floor(s.oszlop) !== s.oszlop || Math.floor(s.sor) !== s.sor) return 'Az oszlop és a sor 1–20, ill. 1–40 közötti egész szám legyen.';
+    if (s.cimke_sz < 15 || s.cimke_m < 10) return 'A címke legalább 15 × 10 mm legyen (a QR-kód miatt).';
+    if (s.lap_sz < s.cimke_sz || s.lap_m < s.cimke_m) return 'A lap kisebb, mint a címke.';
+    if (s.bal + s.oszlop * s.cimke_sz + (s.oszlop - 1) * s.hezag_v > s.lap_sz + 0.5) return 'A címkék nem férnek el a lap szélességében (' + s.lap_sz + ' mm).';
+    if (s.felso + s.sor * s.cimke_m + (s.sor - 1) * s.hezag_f > s.lap_m + 0.5) return 'A címkék nem férnek el a lap magasságában (' + s.lap_m + ' mm).';
+    return '';
   }
 
   /* ---------- E-mail sablonok ---------- */
@@ -1348,6 +1395,9 @@ var RaktarLogic = (function () {
       { statusz: 'elutasitva', kezelte: 'admin@pelda.hu', valasz: 'A raktárban van egy tartalék, azt vidd el.' });
     // Minta eszközök: kiadva, szervizben, lejárt felülvizsgálattal
     db.Eszkozok = []; db.Alairasok = [];
+    // Demo címkeív (élesben a Törzsadatok → Címkeívek fülön veszi fel az admin)
+    db.Cimkeivek = [{ iv_id: 'L-DEMO1', nev: 'Avery LCV11368 – 70 × 35 mm, 3 × 8 (24)', lap_sz: 210, lap_m: 297, oszlop: 3, sor: 8,
+      cimke_sz: 70, cimke_m: 35, felso: 8.5, bal: 0, hezag_v: 0, hezag_f: 0, aktiv: true, alap: true, megjegyzes: '', modositva: nowIso }];
     [['SZ-0001', 'Akkus fúró-csavarozó 18 V', 'Elektromos kéziszerszám', 'Makita', 'DDF484', 365, 300],
       ['SZ-0002', 'Ütvefúró SDS-plus', 'Elektromos kéziszerszám', 'Bosch', 'GBH 2-26', 365, 280],
       ['SZ-0003', 'Lézeres szintező', 'Mérőeszköz', 'Bosch', 'GLL 3-80', 0, 260],
@@ -1385,7 +1435,7 @@ var RaktarLogic = (function () {
 
   return {
     ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, MOVE_TYPES: MOVE_TYPES, IGENY_STATUS: IGENY_STATUS,
-    TOOL_STATE: TOOL_STATE, TOOL_EVENTS: TOOL_EVENTS, SIDE_TABLES: SIDE_TABLES, toolStates: toolStates, nextToolCode: nextToolCode, isToolItem: isToolItem, signaturesFor: signaturesFor, sealPayload: sealPayload, sealVersion: sealVersion, moveLabel: moveLabel, SCHEMA: SCHEMA, TABLES: TABLES, BACKDATE_DAYS: BACKDATE_DAYS,
+    TOOL_STATE: TOOL_STATE, TOOL_EVENTS: TOOL_EVENTS, SIDE_TABLES: SIDE_TABLES, toolStates: toolStates, nextToolCode: nextToolCode, isToolItem: isToolItem, signaturesFor: signaturesFor, sealPayload: sealPayload, sheetError: sheetError, sealVersion: sealVersion, moveLabel: moveLabel, SCHEMA: SCHEMA, TABLES: TABLES, BACKDATE_DAYS: BACKDATE_DAYS,
     normalize: normalize, round3: round3,
     newId: newId, get: get, exportDb: exportDb, cloneDb: cloneDb,
     can: can, PERMS: PERMS, filterSnapshot: filterSnapshot, applyOp: applyOp, computeStock: computeStock, orderInfo: orderInfo,

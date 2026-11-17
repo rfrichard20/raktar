@@ -217,14 +217,23 @@ export function popover(anchor, content, { onMount, onClose, minWidth } = {}) {
   el.innerHTML = String(content);
   document.body.appendChild(el);
   const place = () => {
+    el.style.maxHeight = '';
     const r = anchor.getBoundingClientRect();
-    const w = el.offsetWidth, h = el.offsetHeight;
+    const w = el.offsetWidth;
     // clientWidth: a görgetősáv nélküli szélesség (az innerWidth-szel a panel a görgetősáv alá lógna, és vízszintes görgetés jelenne meg)
     let left = Math.min(r.left, document.documentElement.clientWidth - w - 8);
-    let top = r.bottom + 4;
-    if (top + h > window.innerHeight - 8 && r.top - h - 4 > 8) top = r.top - h - 4; // felfelé, ha alul nincs hely
+    // Mobilon az alsó menüsáv (fix) eltakarná a panel alját: azt a helyet nem számoljuk
+    const nav = document.getElementById('nav');
+    const bottomBar = nav && getComputedStyle(nav).position === 'fixed' && nav.offsetHeight < window.innerHeight / 2 ? nav.offsetHeight : 0;
+    const below = window.innerHeight - bottomBar - r.bottom - 12, above = r.top - 12;
+    const h = el.offsetHeight;
+    let top;
+    if (h <= below) top = r.bottom + 4;                 // alatta elfér
+    else if (h <= above) top = r.top - h - 4;           // fölötte elfér
+    else if (below >= above) { el.style.maxHeight = Math.max(120, below) + 'px'; top = r.bottom + 4; } // egyik sem: a nagyobbik oldal, görgethetően
+    else { el.style.maxHeight = Math.max(120, above) + 'px'; top = r.top - el.offsetHeight - 4; }
     el.style.left = Math.max(8, left) + window.scrollX + 'px';
-    el.style.top = top + window.scrollY + 'px';
+    el.style.top = Math.max(8, top) + window.scrollY + 'px';
   };
   place();
   const onDoc = e => { if (!el.contains(e.target) && !anchor.contains(e.target)) close(); };

@@ -322,7 +322,28 @@ new MutationObserver(muts => {
 const applyPrefs = () => document.body.classList.toggle('no-help', !store.getPref('help', true));
 applyPrefs();
 
-store.subscribe(kind => {
+/**
+ * Háttérfrissítés (szinkron, menü, szinkronjelző) közben a fókuszban lévő beviteli mező maradjon a képernyőn ugyanott:
+ * a felső / alsó sáv átrendeződése vagy a böngésző görgetés-igazítása ne lökje el (pl. leltározás közben a mezőt
+ * a ragadós fejléc alá, mobilon a billentyűzet mögé).
+ */
+function keepFocusInPlace(fn) {
+  const el = document.activeElement;
+  const field = el && el !== document.body && $('view').contains(el) && isTextInput(el) ? el : null;
+  const before = field ? field.getBoundingClientRect().top : 0;
+  fn();
+  if (!field || !field.isConnected) return;
+  const d = field.getBoundingClientRect().top - before;
+  if (Math.abs(d) > 1) window.scrollBy(0, d);
+  // A böngésző a következő képkockában még igazíthat (scroll anchoring): akkor is visszaállítjuk
+  requestAnimationFrame(() => {
+    if (!field.isConnected || document.activeElement !== field) return;
+    const d2 = field.getBoundingClientRect().top - before;
+    if (Math.abs(d2) > 1) window.scrollBy(0, d2);
+  });
+}
+
+store.subscribe(kind => keepFocusInPlace(() => {
   renderStatus();
   // 'status': csak a szinkron állapota változott – a nézetek maradnak; a Fiók oldal ezt is mutatja (gomb, mérések)
   if (kind === 'status') { if (current && current.name === 'fiok' && store.state.user) renderView(); return; }
@@ -333,7 +354,7 @@ store.subscribe(kind => {
   // Az éppen kitöltés alatt álló űrlapokat nem rajzoljuk újra (fókusz, gépelés megmarad)
   if (current.view.liveUpdate === false) { current.view.onData && current.view.onData(); return; }
   renderView();
-});
+}));
 
 window.addEventListener('hashchange', render);
 

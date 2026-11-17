@@ -29,7 +29,6 @@ function sortVal(t, s, key) {
     case 'min': return t.min_keszlet;
     case 'uton': return s.uton;
     case 'leltar': return s.leltarDatum || '';
-    case 'polc': return (t.raktar || '~') + ' ' + (t.polc || '~') + ' ' + norm(t.megnevezes);
     default: return norm(t.megnevezes);
   }
 }
@@ -44,6 +43,8 @@ function rows() {
     .filter(t => match(`${t.megnevezes} ${t.kategoria} ${t.raktar || ''} ${t.polc} ${t.tetel_id}`))
     .filter(t => f(t, stock[t.tetel_id]))
     .sort((a, b) => {
+      // Hely szerint: a bejárási sorrend (polc természetes számsorrendben, a polcon belül a beállított sorszám)
+      if (ui.sort === 'polc') return store.byPlace(a, b) * ui.dir;
       const x = sortVal(a, stock[a.tetel_id], ui.sort), y = sortVal(b, stock[b.tetel_id], ui.sort);
       return (x < y ? -1 : x > y ? 1 : 0) * ui.dir;
     });

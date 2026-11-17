@@ -11,8 +11,10 @@ const L = window.RaktarLogic;
 // Vázlat: { id, label, started, items: [tetel_id], counts: { tetel_id: { q, at } }, notes: { tetel_id: szöveg } }
 const slot = store.draftSlot('leltar');
 // cats / whs: indítás (raktár / kategória választó); cf: a számlálólap szűrője; sSel: korábbi leltárak szűrője
-const ui = { q: '', cats: new Set(), whs: new Set(), sSel: { ki: new Set() },
+const ui = { q: '', cats: new Set(), whs: new Set(), opt: new Set(), sSel: { ki: new Set() },
   cf: { wh: new Set(), polc: new Set(), cat: new Set(), egyeb: new Set() } };
+// A számlálólapra keresésből / beolvasással felvett tételek: a szűrő mellett is látszanak (a szűrőt nem kell kikapcsolni)
+const pinned = new Set();
 
 const save = slot.save;
 
@@ -25,7 +27,7 @@ function start(ids, label) {
     id: `LT-${dateStamp(d)}-${L.newId('', 4)}`,
     label, started: d.toISOString(), items: sortItems(ids), counts: {}, notes: {},
   };
-  ui.q = ''; Object.values(ui.cf).forEach(x => x.clear());
+  ui.q = ''; ui.order = null; Object.values(ui.cf).forEach(x => x.clear()); pinned.clear();
   save();
 }
 
@@ -147,9 +149,12 @@ function renderStart(root, ctx) {
   const multiWh = whs.length > 1;
   const inWh = t => !multiWh || !ui.whs.size || ui.whs.has(t.raktar);
   const inCat = t => !ui.cats.size || ui.cats.has(t.kategoria);
-  const selectedNow = () => (ui.cats.size || (multiWh && ui.whs.size) ? items.filter(t => inWh(t) && inCat(t)) : []);
+  // „Csak az esedékes tételek”: a választott raktár / kategória tételei közül csak a lejárt leltári ciklusúak
+  const dueOnly = () => ui.opt.has('esedekes');
+  const inDue = t => !dueOnly() || st[t.tetel_id].esedekes;
+  const selectedNow = () => (ui.cats.size || (multiWh && ui.whs.size) ? items.filter(t => inWh(t) && inCat(t) && inDue(t)) : []);
   const selected = selectedNow();
-  const selText = [...(multiWh ? ui.whs : []), ...ui.cats].join(', ');
+  const selText = [...(multiWh ? ui.whs : []), ...ui.cats].join(', ') + (dueOnly() && (ui.cats.size || ui.whs.size) ? ' · csak esedékes' : '');
   root.innerHTML = String(html`
     <div class="page-head"><h1>Leltár</h1>${help('Válaszd ki, mit számoltok meg. Részleges leltárnál a nem számolt tételek korábbi értéke marad érvényben. A beírt adatok a készüléken azonnal mentődnek, így internet nélkül is folytatható, és bezárás után sem vesznek el.')}</div>
     <div class="choice-row">
@@ -178,9 +183,10 @@ function renderStart(root, ctx) {
 
   // Raktár / kategória választó: a közös checkboxos legördülő (a kategóriák darabszáma a választott raktárakra értendő)
   const openPicker = anchor => openFilter(anchor, () => [
-    { key: 'whs', title: 'Raktár', options: multiWh ? countOptions(whs, items, 'raktar') : [] },
-    { key: 'cats', title: 'Kategória', options: cats.map(c => [c, c, items.filter(t => t.kategoria === c && inWh(t)).length]) },
-  ], { whs: ui.whs, cats: ui.cats }, null, { summary: () => html`<b>${selectedNow().length}</b> tétel`, onClose: () => ctx.rerender() });
+    { key: 'opt', title: 'Szűkítés', options: [['esedekes', 'Csak az esedékes tételek', due.length]] },
+    { key: 'whs', title: 'Raktár', options: multiWh ? whs.map(w => [w, w, items.filter(t => t.raktar === w && inDue(t)).length]) : [] },
+    { key: 'cats', title: 'Kategória', options: cats.map(c => [c, c, items.filter(t => t.kategoria === c && inWh(t) && inDue(t)).length]) },
+  ], { opt: ui.opt, whs: ui.whs, cats: ui.cats }, null, { summary: () => html`<b>${selectedNow().length}</b> tétel`, onClose: () => ctx.rerender() });
 
   const openCustom = anchor => {
     const list = templates();
@@ -266,15 +272,50 @@ function infoHtml(id) {
     <div class="meta">${store.placeLabel(t)} · nyilvántartott: ${fmtNum(st.keszlet)} ${t.mertekegyseg} · előző leltár: ${fmtDate(st.leltarDatum)}${note ? html` · ${noteHtml(note)}` : ''}</div>`;
 }
 
-// Sor: név + adatok | eltérés (fix oszlop – beíráskor nem mozdul a lista) | megszámolt mennyiség
+// Sor: név + adatok | eltérés (fix oszlop – beíráskor nem mozdul a lista) | megszámolt mennyiség.
+// Sorrend módban a mennyiség helyén fel / le nyíl (a polcon belüli helye).
 function rowHtml(id) {
   const t = store.get('Tetelek', id);
   const c = slot.draft.counts[id];
+  if (ui.order) return html`<div class="count-row order-row" data-id="${id}">
+    <div><div class="name">${t.megnevezes}</div><div class="meta">${store.placeLabel(t)}</div></div>
+    <span></span>
+    <span class="order-btns"><button type="button" class="icon-btn" data-mv="-1" title="Feljebb" aria-label="${t.megnevezes} feljebb">${ICONS.up}</button>
+      <button type="button" class="icon-btn" data-mv="1" title="Lejjebb" aria-label="${t.megnevezes} lejjebb">${ICONS.down}</button></span>
+  </div>`;
   return html`<div class="count-row ${c ? 'done' : ''}" data-id="${id}">
     <div class="inv-info" data-menu role="button" tabindex="0" title="Megjegyzés, eltávolítás">${infoHtml(id)}</div>
     <div class="diff">${diffCell(id)}</div>
     <input type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="${t.mertekegyseg}" value="${c ? String(c.q) : ''}" aria-label="${t.megnevezes} mennyiség">
   </div>`;
+}
+
+/** A hely kulcsa (raktár + polc): a sorrend polconként értendő. */
+const placeKey = t => `${t.raktar || ''}|${t.polc || ''}`;
+
+/**
+ * Sorrend mentése: polconként a leltárban lévő tételek új sorrendje a polc összes tételének sorszámába kerül
+ * (a leltárban nem szereplő tételek a helyükön maradnak), 1-től folyamatosan; csak a változottak mennek fel.
+ */
+async function saveOrder(order, original) {
+  const group = list => {
+    const m = new Map();
+    list.forEach(id => { const t = store.get('Tetelek', id); if (t) (m.get(placeKey(t)) || m.set(placeKey(t), []).get(placeKey(t))).push(id); });
+    return m;
+  };
+  const byKey = group(order), before = group(original);
+  const rows = [];
+  byKey.forEach((ids, key) => {
+    if (ids.join() === (before.get(key) || []).join()) return; // ezen a polcon nem változott
+    if (!key.split('|')[1]) return; // polc nélküli tételeknek nincs polcon belüli sorrendje
+    const full = store.materials().filter(t => placeKey(t) === key).sort(store.byPlace).map(t => t.tetel_id);
+    const inList = new Set(ids);
+    let k = 0;
+    const merged = full.map(id => (inList.has(id) ? ids[k++] : id));
+    merged.forEach((id, i) => { if ((Number(store.get('Tetelek', id).polc_sorrend) || 0) !== i + 1) rows.push({ tetel_id: id, polc_sorrend: i + 1 }); });
+  });
+  if (rows.length) await store.enqueue({ type: 'polc_sorrend', rows });
+  return rows.length;
 }
 
 /** A számlálólap szűrő csoportjai: a leltárban lévő tételek raktárai, polcai, kategóriái (darabszámmal). */
@@ -291,36 +332,74 @@ function countGroups(ids) {
 }
 
 function renderCount(root, ctx) {
-  const ids = slot.draft.items.filter(id => store.get('Tetelek', id));
+  // Sorrend módban a módosított (még nem mentett) sorrend látszik
+  const ids = (ui.order || slot.draft.items).filter(id => store.get('Tetelek', id));
   let lastPolc = null;
   const parts = [];
   for (const id of ids) {
     const t0 = store.get('Tetelek', id); const polc = t0.polc || t0.raktar ? store.placeLabel(t0) : 'Polc nélkül';
     // A polccím egyben az oszlopok fejléce is (ragadós)
-    if (polc !== lastPolc) { parts.push(html`<div class="group-title" data-group="${polc}"><span>${polc}</span><span class="num">Eltérés</span><span class="num">Megszámolt</span></div>`); lastPolc = polc; }
+    if (polc !== lastPolc) { parts.push(html`<div class="group-title" data-group="${polc}"><span>${polc}</span><span class="num">${ui.order ? '' : 'Eltérés'}</span><span class="num">${ui.order ? 'Sorrend' : 'Megszámolt'}</span></div>`); lastPolc = polc; }
     parts.push(rowHtml(id));
   }
   root.innerHTML = String(html`
     <div class="page-head"><h1>Leltár: ${slot.draft.label}</h1>
-      ${help('Írd be a megszámolt mennyiséget; Enterrel a következő tételre lépsz. Egy tétel nevére koppintva megjegyzést írhatsz hozzá (pl. máshol van, sérült), vagy eltávolíthatod a leltárból. Ha valami nincs meg, írj be 0-t.')}
+      ${help('Írd be a megszámolt mennyiséget; Enterrel a következő tételre lépsz. Egy tétel nevére koppintva megjegyzést írhatsz hozzá (pl. máshol van, sérült), vagy eltávolíthatod a leltárból. Ha valami nincs meg, írj be 0-t.<br><br>A „Sorrend” gombbal a tételek polcon belüli sorrendje állítható (ahogy a polcon állnak) – ez megmarad, a következő leltár és az Anyagkészlet is így listázza.')}
       <span class="badge badge-muted">${slot.draft.id}</span><span class="small muted">indítva: ${fmtDate(slot.draft.started, true)}</span></div>
     <div class="card">
-      <div class="card-head sticky-search">
+      ${ui.order ? html`<div class="card-head sticky-search"><div class="notice notice-info small head-main" style="margin:0">
+          Sorrend: a nyilakkal állítsd a tételeket olyan sorrendbe, ahogy a polcon állnak (polconként). A beírt mennyiségek megmaradnak.</div></div>`
+        : html`<div class="card-head sticky-search">
         <div class="toolbar head-main" style="margin:0">
           <input type="search" id="q" placeholder="Keresés / tétel hozzáadása…" title="Szűrés a listában; ami nincs a leltárban, a lista alján hozzáadható" value="${ui.q}">
           ${filterButton(ui.cf)}
           ${scanButton('scan', 'Polc- vagy tételcímke beolvasása')}
+          <button type="button" class="btn filter-btn" data-a="order" title="Sorrend: a tételek polcon belüli sorrendjének beállítása" aria-label="Sorrend beállítása">${ICONS.moves}</button>
         </div>
-      </div>
+      </div>`}
       <div class="count-list" id="list">${parts}</div>
       <div id="offers"></div>
-      <div class="bottom-bar" id="bbar">
+      ${ui.order ? html`<div class="bottom-bar"><span class="grow small muted">Polconként a nyilakkal</span>
+          <button class="btn btn-sm" data-a="ordercancel">Mégse</button>
+          <button class="btn btn-sm btn-primary" data-a="ordersave">Sorrend mentése</button></div>`
+        : html`<div class="bottom-bar" id="bbar">
         <div class="bb-prog"><span><b id="prog"></b> <span class="bb-done-text">– minden tétel megszámolva</span></span>
           <div class="progress"><div id="bar"></div></div></div>
         <button class="btn btn-sm btn-link-danger" data-a="discard" title="Leltár elvetése">Elvetés</button>
         <button class="btn btn-sm btn-primary bb-main" data-a="finish">Lezárás<span class="bb-done-text">&nbsp;és feltöltés</span></button>
-      </div>
+      </div>`}
     </div>`);
+
+  if (ui.order) {
+    // Sorrend mód: fel / le a polcon belül (a szomszédos, azonos helyű tétellel cserél)
+    root.onclick = async e => {
+      const mv = e.target.closest('[data-mv]');
+      if (mv) {
+        const id = mv.closest('[data-id]').dataset.id, i = ui.order.indexOf(id), j = i + Number(mv.dataset.mv);
+        const a = store.get('Tetelek', id), b = store.get('Tetelek', ui.order[j]);
+        if (!b || placeKey(a) !== placeKey(b)) return; // a polc elején / végén
+        [ui.order[i], ui.order[j]] = [ui.order[j], ui.order[i]];
+        const y = window.scrollY;
+        renderCount(root, ctx);
+        window.scrollTo(0, y);
+        root.querySelector(`[data-id="${id}"] [data-mv="${mv.dataset.mv}"]`)?.focus();
+        return;
+      }
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'ordercancel') { ui.order = null; return ctx.rerender(); }
+      if (a === 'ordersave') {
+        try {
+          const n = await saveOrder(ui.order, slot.draft.items);
+          slot.draft.items = sortItems(slot.draft.items); // a mentett sorszámok szerint
+          save();
+          toast(n ? 'Sorrend mentve' : 'A sorrend nem változott', 'ok');
+        } catch (x) { return toast(x.message, 'error', 6000); }
+        ui.order = null;
+        ctx.rerender();
+      }
+    };
+    return;
+  }
 
   const list = root.querySelector('#list');
   const progress = () => {
@@ -335,9 +414,11 @@ function renderCount(root, ctx) {
     const groups = {};
     list.querySelectorAll('.count-row').forEach(row => {
       const t = store.get('Tetelek', row.dataset.id);
-      const show = match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) &&
+      // A keresésből / beolvasással most felvett vagy kikeresett tétel a szűrőtől függetlenül látszik (a szűrő marad)
+      const show = (pinned.has(row.dataset.id) && match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`)) ||
+        (match(`${t.megnevezes} ${t.polc} ${t.raktar || ''} ${t.kategoria}`) &&
         inSel(ui.cf.wh, t.raktar) && inSel(ui.cf.polc, t.polc) && inSel(ui.cf.cat, t.kategoria) &&
-        !(ui.cf.egyeb.has('hianyzo') && slot.draft.counts[row.dataset.id]);
+        !(ui.cf.egyeb.has('hianyzo') && slot.draft.counts[row.dataset.id]));
       row.hidden = !show;
       const g = t.polc || t.raktar ? store.placeLabel(t) : 'Polc nélkül';
       groups[g] = groups[g] || show;
@@ -351,7 +432,7 @@ function renderCount(root, ctx) {
   // Tétel felvétele a folyamatban lévő leltárba: a helyére kerül (bejárási sorrend), és rögtön számolható
   const addItem = t => {
     slot.draft.items = sortItems([...slot.draft.items, t.tetel_id]);
-    Object.values(ui.cf).forEach(x => x.clear()); // a szűrő ne rejtse el az új tételt (a keresés marad)
+    pinned.add(t.tetel_id); // a szűrő ne rejtse el az új tételt – de a szűrő maga megmarad
     save();
     ctx.rerender();
     const inp = root.querySelector(`.count-row[data-id="${t.tetel_id}"] input`);
@@ -456,12 +537,13 @@ function renderCount(root, ctx) {
       setTimeout(() => {
         if (!slot.draft.items.includes(t.tetel_id)) return addItem(t);
         const row = list.querySelector(`.count-row[data-id="${t.tetel_id}"]`);
-        if (row && row.hidden) { Object.values(ui.cf).forEach(x => x.clear()); ui.q = ''; root.querySelector('#q').value = ''; applyFilter(); }
+        if (row && row.hidden) { pinned.add(t.tetel_id); ui.q = ''; root.querySelector('#q').value = ''; applyFilter(); }
         const inp = row?.querySelector('input');
         if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
       }, 0);
       return '';
     } });
+    if (b.dataset.a === 'order') { ui.order = [...slot.draft.items]; return ctx.rerender(); }
     if (b.dataset.a === 'discard') {
       if (!(await confirmDialog('Leltár elvetése', 'A beírt értékek elvesznek. Biztosan elveted?', 'Elvetés', 'danger'))) return;
       await slot.clear(); ctx.rerender();

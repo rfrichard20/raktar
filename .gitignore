@@ -1,0 +1,26 @@
+# A repó NYILVÁNOS (a GitHub Pages ingyenes csomagja csak nyilvános repóból szolgál ki).
+# ALAPBÓL MINDEN TILTVA: a projekt gyökerében csak az alább név szerint engedélyezett fájlok / mappák kerülnek fel.
+# Új nyilvános fájlt szándékosan, ide felvéve lehet hozzáadni. Belső anyag (jegyzet, audit, export, teszt) helye: privat/
+/*
+!/web/
+!/apps-script/
+!/.github/
+!/.claude/
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/CLAUDE.md
+!/FEJLESZTES.md
+!/UZEMBE_HELYEZES.md
+!/serve.ps1
+
+# Claude Code: csak az indítási beállítás közös
+/.claude/*
+!/.claude/launch.json
+
+# A web/ a nyilvános weboldal maga – oda belső fájl soha ne kerüljön. Biztonsági háló:
+web/**/*.pdf
+web/**/*.xlsx
+web/**/*.csv
+web/_proba/
+web/_teszt/
