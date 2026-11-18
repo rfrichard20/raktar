@@ -24,29 +24,29 @@ const perPage = s => s.oszlop * s.sor;
 function sources(kind) {
   const db = store.state.db;
   if (kind === 'tetel') {
-    const cikk = {};
-    (db.Forrasok || []).filter(f => f.elsodleges).forEach(f => { cikk[f.tetel_id] = f.cikkszam; });
+    // A címkén a belső azonosító áll (a beszállítói cikkszám a beszállítóval változhat)
     return store.materials().slice().sort(store.byPlace).map(t => ({
-      key: t.tetel_id, text: `${t.megnevezes} ${store.placeLabel(t)} ${t.kategoria} ${cikk[t.tetel_id] || ''}`,
+      key: t.tetel_id, text: `${t.megnevezes} ${store.placeLabel(t)} ${t.kategoria} ${t.tetel_id}`,
       row: html`<b>${t.megnevezes}</b> <span class="small muted">${store.placeLabel(t)}</span>`,
       label: () => html`${qrSvg(codeLink.tetel(t.tetel_id))}<div class="lt"><div class="l1">${t.megnevezes}</div>
-        <div class="l2">${store.placeLabel(t)}</div>${cikk[t.tetel_id] ? html`<div class="l2">Cikkszám: ${cikk[t.tetel_id]}</div>` : ''}</div>`,
+        <div class="l2">${store.placeLabel(t)}</div><div class="l2">Azonosító: ${t.tetel_id}</div></div>`,
     }));
   }
   if (kind === 'hely') {
     // A tételek és az eszközök tárolási helyei együtt (egy polcon lehet anyag és eszköz is)
     const seen = new Map();
     const add = (o, kind) => {
-      const k = `${o.raktar || ''}|${o.polc}`;
-      if (!seen.has(k)) seen.set(k, { r: o.raktar || '', p: o.polc, n: 0, e: 0 });
+      const k = `${o.raktar || ''}|${o.polc || ''}`;
+      if (!seen.has(k)) seen.set(k, { r: o.raktar || '', p: o.polc || '', n: 0, e: 0 });
       seen.get(k)[kind]++;
     };
-    store.materials().filter(t => t.polc).forEach(t => add(t, 'n'));
-    (db.Eszkozok || []).filter(e => e.polc && e.allapot !== 'selejtezve').forEach(e => add(e, 'e'));
+    // Polc nélküli raktár is hely (a címkéjén csak a raktár neve áll)
+    store.materials().filter(t => t.polc || t.raktar).forEach(t => add(t, 'n'));
+    (db.Eszkozok || []).filter(e => (e.polc || e.raktar) && e.allapot !== 'selejtezve').forEach(e => add(e, 'e'));
     return [...seen.entries()].sort((a, b) => (a[1].r || '~').localeCompare(b[1].r || '~', 'hu') || a[1].p.localeCompare(b[1].p, 'hu', { numeric: true })).map(([k, x]) => ({
       key: k, text: `${x.r} ${x.p}`,
-      row: html`<b>${x.p}</b> <span class="small muted">${[x.r, x.n && `${x.n} tétel`, x.e && `${x.e} eszköz`].filter(Boolean).join(' · ')}</span>`,
-      label: () => html`${qrSvg(codeLink.hely(x.r, x.p))}<div class="lt"><div class="big">${x.p}</div><div class="l2">${x.r}</div></div>`,
+      row: html`<b>${x.p || x.r}</b> <span class="small muted">${[x.p && x.r, x.n && `${x.n} tétel`, x.e && `${x.e} eszköz`].filter(Boolean).join(' · ')}</span>`,
+      label: () => html`${qrSvg(codeLink.hely(x.r, x.p))}<div class="lt"><div class="big">${x.p || x.r}</div>${x.p ? html`<div class="l2">${x.r}</div>` : ''}</div>`,
     }));
   }
   const pending = new Set(store.state.outbox.filter(o => o.type === 'eszkoz_mentes' && o.eszkoz).map(o => o.eszkoz.eszkoz_id));
