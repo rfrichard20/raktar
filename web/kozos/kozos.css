@@ -1,4 +1,4 @@
-/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (5effec2+helyi), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: f92c1e780225cee5 */
+/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (71f50ef+helyi), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: 64d21ec25a3b26a5 */
 /* ===== Közös stílusok: betűtípus, színtokenek (világos / sötét), alapelemek, segédosztályok =====
    Az app saját css/app.css-e előtt töltődik be (index.html). A tokeneket és az alapokat itt kell módosítani, nem az appban. */
 
@@ -153,7 +153,10 @@ p { margin: 0 0 .75rem; }
   body.nav-mini .nav { padding: .75rem .5rem; overflow: hidden; }
   body.nav-mini .nav a { position: relative; justify-content: center; padding: .65rem 0; }
   body.nav-mini .nav a .lbl { display: none; }
-  body.nav-mini .nav .nav-group { height: 0; margin: .5rem .6rem; padding: 0; overflow: hidden; font-size: 0; border-top: 1px solid var(--border); }
+  /* A margin-top-ot nem írjuk felül, ha a csoport egyben .nav-bottom (az oldalsáv aljára tapad: margin-top: auto) */
+  body.nav-mini .nav .nav-group { height: 0; margin-inline: .6rem; padding: 0; overflow: hidden; font-size: 0; border-top: 1px solid var(--border); }
+  body.nav-mini .nav .nav-group:not(.nav-bottom) { margin-block: .5rem; }
+  body.nav-mini .nav .nav-group.nav-bottom { margin-bottom: .5rem; }
   body.nav-mini .nav .nav-group:first-child { display: none; }
   body.nav-mini .nav .count { position: absolute; top: 1px; right: 3px; margin: 0; }
 }
