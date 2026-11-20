@@ -4,6 +4,7 @@
 import * as store from '../store.js';
 import { html, raw, help, matcher, modal, toast, sec, printDoc } from '../ui.js';
 import { codeLink, loadQr, qrSvg } from '../qr.js';
+import { filterButton, openFilter, inSel, countOptions } from './common.js';
 
 const KINDS = [['tetel', 'Tételek'], ['hely', 'Polcok, helyek'], ['eszkoz', 'Eszközök']];
 
@@ -28,7 +29,8 @@ function sources(kind) {
     return store.materials().slice().sort(store.byPlace).map(t => ({
       key: t.tetel_id, text: `${t.megnevezes} ${store.placeLabel(t)} ${t.kategoria} ${t.tetel_id}`,
       row: html`<b>${t.megnevezes}</b> <span class="small muted">${store.placeLabel(t)}</span>`,
-      label: () => html`${qrSvg(codeLink.tetel(t.tetel_id))}<div class="lt"><div class="l1">${t.megnevezes}</div>
+      f: { wh: t.raktar || '', polc: t.polc || '', cat: t.kategoria || '' },
+      label: qr => html`${qr ? qrSvg(codeLink.tetel(t.tetel_id)) : ''}<div class="lt"><div class="l1">${t.megnevezes}</div>
         <div class="l2">${store.placeLabel(t)}</div><div class="l2">Azonosító: ${t.tetel_id}</div></div>`,
     }));
   }
@@ -46,7 +48,8 @@ function sources(kind) {
     return [...seen.entries()].sort((a, b) => (a[1].r || '~').localeCompare(b[1].r || '~', 'hu') || a[1].p.localeCompare(b[1].p, 'hu', { numeric: true })).map(([k, x]) => ({
       key: k, text: `${x.r} ${x.p}`,
       row: html`<b>${x.p || x.r}</b> <span class="small muted">${[x.p && x.r, x.n && `${x.n} tétel`, x.e && `${x.e} eszköz`].filter(Boolean).join(' · ')}</span>`,
-      label: () => html`${qrSvg(codeLink.hely(x.r, x.p))}<div class="lt"><div class="big">${x.p || x.r}</div>${x.p ? html`<div class="l2">${x.r}</div>` : ''}</div>`,
+      f: { wh: x.r },
+      label: qr => html`${qr ? qrSvg(codeLink.hely(x.r, x.p)) : ''}<div class="lt"><div class="big">${x.p || x.r}</div>${x.p ? html`<div class="l2">${x.r}</div>` : ''}</div>`,
     }));
   }
   const pending = new Set(store.state.outbox.filter(o => o.type === 'eszkoz_mentes' && o.eszkoz).map(o => o.eszkoz.eszkoz_id));
@@ -57,7 +60,8 @@ function sources(kind) {
       // sorszámot kapta) – a címkéje csak a feltöltés után nyomtatható, hogy a kinyomtatott szám biztosan végleges legyen
       blocked: pending.has(e.eszkoz_id),
       row: html`<b>${e.azonosito}</b> ${e.megnevezes}${pending.has(e.eszkoz_id) ? html` <span class="small t-warn">· feltöltésre vár – utána nyomtatható</span>` : ''}`,
-      label: () => html`${qrSvg(codeLink.eszkoz(e.azonosito))}<div class="lt"><div class="big">${e.azonosito}</div>
+      f: { wh: e.raktar || '', polc: e.polc || '', cat: e.kategoria || '' },
+      label: qr => html`${qr ? qrSvg(codeLink.eszkoz(e.azonosito)) : ''}<div class="lt"><div class="big">${e.azonosito}</div>
         <div class="l1">${e.megnevezes}</div>${e.gyari_szam ? html`<div class="l2">${e.gyari_szam}</div>` : ''}</div>`,
     }));
 }
@@ -67,7 +71,7 @@ function sources(kind) {
  * A lap a megadott méretű (A4 ív, ill. szalagnál maga a címke), milliméterben méretezett rács (margó = a rács
  * eltolása); a QR és a betűk a címke méretéhez igazodnak. A lapméret a nyomtatáshoz egy @page szabállyal megy ki.
  */
-function sheetsHtml(labels, skip, s) {
+function sheetsHtml(labels, skip, s, withQr = true) {
   const cells = [...Array(skip).fill(null), ...labels];
   const pages = [];
   for (let i = 0; i < cells.length; i += perPage(s)) pages.push(cells.slice(i, i + perPage(s)));
@@ -76,7 +80,7 @@ function sheetsHtml(labels, skip, s) {
   const style = `--lw:${s.cimke_sz}mm;--lh:${s.cimke_m}mm;--qr:${qr}mm;--cols:${s.oszlop};width:${s.lap_sz}mm;height:${s.lap_m}mm;` +
     `padding:${s.felso}mm 0 0 ${s.bal}mm;column-gap:${s.hezag_v}mm;row-gap:${s.hezag_f}mm`;
   return html`${raw(`<style>@page labels { size: ${Number(s.lap_sz)}mm ${Number(s.lap_m)}mm; margin: 0; }</style>`)}
-    ${pages.map(p => html`<div class="labels-page ${size}" style="${style}">${p.map(l => html`<div class="label">${l || ''}</div>`)}</div>`)}`;
+    ${pages.map(p => html`<div class="labels-page ${size}" style="${style}">${p.map(l => html`<div class="label ${withQr ? '' : 'noqr'}">${l || ''}</div>`)}</div>`)}`;
 }
 
 /** Az ablakban választott ív. */
@@ -112,9 +116,20 @@ export function openLabels(kind = 'tetel', pre = []) {
   const sel = { tetel: new Set(), hely: new Set(), eszkoz: new Set() };
   pre.forEach(k => sel[kind].add(k));
   let q = '';
+  // Szűrők fajtánként (a fülváltás megtartja): tételek / eszközök raktár + polc + kategória, helyek raktár szerint
+  const fsel = { tetel: { wh: new Set(), polc: new Set(), cat: new Set() }, hely: { wh: new Set() }, eszkoz: { wh: new Set(), polc: new Set(), cat: new Set() } };
+  const GROUPS = { wh: 'Raktár', polc: 'Polc / hely', cat: 'Kategória' };
+  const filterGroups = () => {
+    const all = sources(kind).map(s => s.f);
+    return Object.keys(fsel[kind]).map(g => ({ key: g, title: GROUPS[g],
+      options: countOptions([...new Set(all.map(f => f[g]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'hu', { numeric: true })), all, g) }));
+  };
+  const visibleList = () => {
+    const match = matcher(q), fs = fsel[kind];
+    return sources(kind).filter(s => match(s.text) && Object.keys(fs).every(g => inSel(fs[g], s.f[g])));
+  };
   const listHtml = () => {
-    const match = matcher(q);
-    const list = sources(kind).filter(s => match(s.text));
+    const list = visibleList();
     const ok = list.filter(s => !s.blocked);
     const all = ok.length && ok.every(s => sel[kind].has(s.key));
     return html`${ok.length ? html`<label class="check-row"><input type="checkbox" data-all ${all ? 'checked' : ''}><span class="grow"><b>Mind (${ok.length})</b></span></label>` : ''}
@@ -128,15 +143,18 @@ export function openLabels(kind = 'tetel', pre = []) {
     body: html`
       <div class="toolbar" style="margin-bottom:.5rem">
         <div class="seg" role="group" aria-label="Címke fajtája">${KINDS.map(([k, l]) => html`<button type="button" class="${k === kind ? 'on' : ''}" data-kind="${k}">${l}</button>`)}</div>
-        ${help(html`A választott címkeív méreteivel (A4-es ív, vagy szalagos címkenyomtató). Új ívtípust az admin a Törzsadatok → Címkeívek fülön vehet fel. Szalagos nyomtatónál a nyomtató beállításaiban ugyanakkora papírméretet válassz, mint a címke.<br><br>Nyomtatáskor a méretezés legyen <b>100% / Tényleges méret</b> (ne „Igazítás az oldalhoz”), a margó <b>Nincs</b> vagy <b>Alapértelmezett</b>. Új ívnél előbb nyomtass sima papírra, és az ívre illesztve ellenőrizd.<br><br>A QR-kód linket tartalmaz: bármelyik telefon kamerájával megnyitja az appot (belépés után) a tétel / eszköz adatlapján, ill. a polc tételeivel.`)}
+        ${help(html`A választott címkeív méreteivel (A4-es ív, vagy szalagos címkenyomtató). Új ívtípust az admin a Törzsadatok → Címkeívek fülön vehet fel. Szalagos nyomtatónál a nyomtató beállításaiban ugyanakkora papírméretet válassz, mint a címke.<br><br>Nyomtatáskor a méretezés legyen <b>100% / Tényleges méret</b> (ne „Igazítás az oldalhoz”), a margó <b>Nincs</b> vagy <b>Alapértelmezett</b>. Új ívnél előbb nyomtass sima papírra, és az ívre illesztve ellenőrizd.<br><br>A QR-kód linket tartalmaz: bármelyik telefon kamerájával megnyitja az appot (belépés után) a tétel / eszköz adatlapján, ill. a polc tételeivel.<br><br>A „QR-kód a címkén” kikapcsolva csak szöveges azonosító címke készül (pl. csomagra); az nem olvasható be.`)}
       </div>
-      <input type="search" data-q placeholder="Keresés…" style="margin-bottom:.5rem">
+      <div class="toolbar" style="margin-bottom:.5rem"><input type="search" data-q placeholder="Keresés…"><span data-fslot style="display:contents">${filterButton(fsel[kind])}</span></div>
       <div class="check-list" data-list>${listHtml()}</div>
       ${sec('Nyomtatás', html`
         <label class="field span-2"><span>Címkeív</span><select name="sheet">${labelSheets().map(s => html`<option value="${s.iv_id}" ${s.iv_id === currentSheet().iv_id ? 'selected' : ''}>${s.nev}</option>`)}</select></label>
-        <label class="field"><span>Kezdés az ív hányadik címkéjén</span><select name="skip" data-skip></select></label>
-        <label class="field"><span>Példány címkénként</span><input name="copies" type="number" min="1" max="24" value="1" inputmode="numeric"></label>`)}
-      <p class="small muted" data-count style="margin:.5rem 0 0"></p>`,
+        <label class="field"><span>Kezdés az ív címkéjén</span><select name="skip" data-skip></select></label>
+        <label class="field"><span>Példány címkénként</span><input name="copies" type="number" min="1" max="24" value="1" inputmode="numeric"></label>
+        <div style="grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.25rem 1rem">
+          <label class="check-row" style="padding:0;border:0" title="Kikapcsolva csak szöveges azonosító címke készül (pl. csomagra); az nem olvasható be."><input type="checkbox" name="qr" ${store.getPref('labelQr', true) ? 'checked' : ''}><span>QR-kód a címkén</span></label>
+          <b class="small" data-count></b>
+        </div>`)}`,
     onMount: el => {
       const list = el.querySelector('[data-list]');
       // Ívváltás: a kezdőpozíció az ív címkeszámáig (szalagnál – 1 címke / lap – nincs értelme, ott 1.)
@@ -151,17 +169,20 @@ export function openLabels(kind = 'tetel', pre = []) {
       const redraw = () => { list.innerHTML = String(listHtml()); upd(); };
       upd();
       el.querySelector('[data-q]').addEventListener('input', e => { q = e.target.value; redraw(); });
+      el.querySelector('[name=qr]').addEventListener('change', e => store.setPref('labelQr', e.target.checked));
       el.addEventListener('click', e => {
+        const fb = e.target.closest('[data-filter]');
+        if (fb) return openFilter(fb, filterGroups, fsel[kind], redraw);
         const b = e.target.closest('[data-kind]');
         if (!b) return;
         kind = b.dataset.kind;
         el.querySelectorAll('[data-kind]').forEach(x => x.classList.toggle('on', x === b));
+        el.querySelector('[data-fslot]').innerHTML = String(filterButton(fsel[kind]));
         redraw();
       });
       list.addEventListener('change', e => {
         if (e.target.matches('[data-all]')) {
-          const match = matcher(q);
-          sources(kind).filter(s => match(s.text) && !s.blocked).forEach(s => (e.target.checked ? sel[kind].add(s.key) : sel[kind].delete(s.key)));
+          visibleList().filter(s => !s.blocked).forEach(s => (e.target.checked ? sel[kind].add(s.key) : sel[kind].delete(s.key)));
           return redraw();
         }
         const k = e.target.dataset.k;
@@ -182,8 +203,9 @@ export function openLabels(kind = 'tetel', pre = []) {
         const held = chosen.filter(s => s.blocked).length;
         if (held) toast(`${held} eszköz még nincs feltöltve, a címkéje kimarad (feltöltés után nyomtatható).`, 'warn', 6000);
         if (held === chosen.length) return false;
-        const labels = chosen.filter(s => !s.blocked).flatMap(s => Array(copies).fill(null).map(() => s.label()));
-        printDoc(sheetsHtml(labels, skip, sheet));
+        const withQr = el.querySelector('[name=qr]').checked;
+        const labels = chosen.filter(s => !s.blocked).flatMap(s => Array(copies).fill(null).map(() => s.label(withQr)));
+        printDoc(sheetsHtml(labels, skip, sheet, withQr));
         return false; // az ablak nyitva marad (pl. újranyomtatás, másik ív)
       },
     }],

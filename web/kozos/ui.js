@@ -1,4 +1,4 @@
-/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (d6b30c7), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: 3c7facdf2a544f12 */
+/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (5effec2+helyi), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: eeca27f895aab6d0 */
 // Közös UI-mag: biztonságos HTML sablon, formázás, keresés, értesítés, modális ablak, legördülő panel, űrlapsegédek.
 // Az app saját js/ui.js-e ezt újraexportálja (export * from '../kozos/ui.js'), és mellé teszi a saját segédeit,
 // így a nézetek továbbra is a './ui.js'-ből importálnak.
@@ -243,6 +243,37 @@ export function popover(anchor, content, { onMount, onClose, minWidth } = {}) {
   openPop = { el, close, anchor };
   if (onMount) onMount(el, close);
   return openPop;
+}
+
+/**
+ * Összecsukható oldalsáv: gomb a felső sáv elején, ami a menüt ikonos, keskeny állapotba teszi (body.nav-mini).
+ * Az állapot a készüléken megmarad (key: localStorage kulcs, appenként más). Csak ≥ 900 px-en látszik; mobilon alsó sáv van.
+ * Az appban az indításkor egyszer kell hívni, a felső sáv (.topbar) kirajzolása után. A menüpontok feliratát
+ * tooltipként kapják (title), mert az ikonos állapotban a felirat rejtve van.
+ */
+export function initNavToggle(key) {
+  const bar = document.querySelector('.topbar');
+  if (!bar || bar.querySelector('.nav-toggle')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'nav-toggle';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>';
+  const apply = (mini, save) => {
+    document.body.classList.toggle('nav-mini', mini);
+    btn.title = mini ? 'Menü kinyitása' : 'Menü összecsukása';
+    btn.setAttribute('aria-label', btn.title);
+    btn.setAttribute('aria-pressed', String(mini));
+    if (save) { try { localStorage.setItem(key, mini ? '1' : '0'); } catch { /* privát mód */ } }
+  };
+  let saved = false;
+  try { saved = localStorage.getItem(key) === '1'; } catch { /* nincs tár */ }
+  apply(saved, false);
+  btn.addEventListener('click', () => apply(!document.body.classList.contains('nav-mini'), true));
+  bar.prepend(btn);
+  document.getElementById('nav')?.addEventListener('mouseover', e => {
+    const a = e.target.closest('a');
+    if (a && !a.title) a.title = (a.querySelector('.lbl-full') || a.querySelector('.lbl'))?.textContent.trim() || '';
+  });
 }
 
 /** Űrlap szekció címmel. layout: 'grid' (több oszlop) vagy 'col' (egymás alatt). */

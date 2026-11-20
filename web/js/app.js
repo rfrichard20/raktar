@@ -1,6 +1,6 @@
 // Alkalmazás váz: útvonalak, navigáció, szinkron jelző.
 import * as store from './store.js';
-import { html, toast, popover, fmtTime } from './ui.js';
+import { html, toast, popover, fmtTime, initNavToggle } from './ui.js';
 import { ICONS } from './icons.js';
 import attekinto from './views/attekinto.js';
 import leltar from './views/leltar.js';
@@ -376,6 +376,7 @@ function openCode(code) {
   }
   return true;
 }
+initNavToggle('raktar:navMini'); // összecsukható (ikonos) oldalsáv
 (function scanButton() {
   const btn = $('scan-btn');
   btn.innerHTML = String(ICONS.scan);

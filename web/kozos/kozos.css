@@ -1,4 +1,4 @@
-/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (5effec2), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: fc9342fdba448ced */
+/* KÖZÖS FÁJL – ne itt szerkeszd! Forrás: Kozos_Claude (5effec2+helyi), frissítés: Kozos_Claude\szinkron.ps1 · lenyomat: f92c1e780225cee5 */
 /* ===== Közös stílusok: betűtípus, színtokenek (világos / sötét), alapelemek, segédosztályok =====
    Az app saját css/app.css-e előtt töltődik be (index.html). A tokeneket és az alapokat itt kell módosítani, nem az appban. */
 
@@ -138,12 +138,26 @@ p { margin: 0 0 .75rem; }
 }
 .nav a:hover:not(.active) { background: var(--surface-2); color: var(--text); }
 .view { padding: 1.25rem; max-width: 1400px; min-width: 0; width: 100%; margin: 0 auto; }
+.nav-toggle { display: none; } /* csak ≥ 900 px-en látszik (lent) */
 @media (min-width: 900px) {
   #app { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-height: 100vh; }
   .topbar { grid-column: 1 / -1; }
   .nav { position: sticky; top: var(--top-h); padding: .75rem; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
   .nav .nav-bottom { margin-top: auto; }
+  /* Összecsukható oldalsáv: ikonos, keskeny állapot (body.nav-mini; initNavToggle, ui.js). Csak ≥ 900 px-en. */
+  #app { transition: grid-template-columns .2s ease; }
+  .nav-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; margin-left: -.4rem; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+  .nav-toggle:hover { background: var(--surface-2); color: var(--text); }
+  .nav-toggle svg { width: 22px; height: 22px; }
+  body.nav-mini { --nav-w: 64px; }
+  body.nav-mini .nav { padding: .75rem .5rem; overflow: hidden; }
+  body.nav-mini .nav a { position: relative; justify-content: center; padding: .65rem 0; }
+  body.nav-mini .nav a .lbl { display: none; }
+  body.nav-mini .nav .nav-group { height: 0; margin: .5rem .6rem; padding: 0; overflow: hidden; font-size: 0; border-top: 1px solid var(--border); }
+  body.nav-mini .nav .nav-group:first-child { display: none; }
+  body.nav-mini .nav .count { position: absolute; top: 1px; right: 3px; margin: 0; }
 }
+body.logged-out .nav-toggle { display: none; }
 @media (max-width: 899px) {
   .nav .nav-group { display: none; }
   .nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: flex; justify-content: space-around; border-top: 1px solid var(--border); padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); }

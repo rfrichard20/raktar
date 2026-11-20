@@ -493,6 +493,12 @@ body.logged-out .view { max-width: none; }
 .label .l1 { font-size: 10pt; font-weight: 700; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .label .l2 { font-size: 8pt; line-height: 1.2; }
 .label .big { font-size: 15pt; font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+/* QR nélküli (egyszerű azonosító) címke: a szöveg kitölti a címkét, középre igazítva */
+.label.noqr { justify-content: center; text-align: center; }
+.label.noqr .lt { align-items: center; width: 100%; }
+.label.noqr .l1 { font-size: 13pt; } .label.noqr .l2 { font-size: 10pt; } .label.noqr .big { font-size: 20pt; }
+.lbl-s .label.noqr .l1 { font-size: 10pt; } .lbl-s .label.noqr .l2 { font-size: 8pt; } .lbl-s .label.noqr .big { font-size: 15pt; }
+.lbl-l .label.noqr .l1 { font-size: 17pt; } .lbl-l .label.noqr .l2 { font-size: 13pt; } .lbl-l .label.noqr .big { font-size: 26pt; }
 
 /* Aláírópad (signaturePad) és tárolt aláírás (signatureSvg) */
 .sig-pad { position: relative; max-width: 540px; border: 1px dashed var(--border); border-radius: 10px; background: var(--surface-2); }

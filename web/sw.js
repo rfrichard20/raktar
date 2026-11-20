@@ -4,7 +4,7 @@
 // FIGYELEM: a Tereppel közös originen (GitHub Pages) a gyorsítótárak is közösek → csak a saját, PREFIX-szel
 // kezdődő gyorsítótárakat szabad törölni, különben a másik app offline fájljai vesznek el.
 const PREFIX = 'raktar-';
-const VERSION = PREFIX + 'v70';
+const VERSION = PREFIX + 'v74';
 const FONTS = ['400', '500', '600', '700'].flatMap(w => ['latin', 'latin-ext'].map(s => `kozos/fonts/poppins-${w}-${s}.woff2`));
 const ASSETS = [
   ...FONTS, './', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png',

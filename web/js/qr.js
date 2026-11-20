@@ -78,8 +78,20 @@ export const scanButton = (action = 'scan', title = 'QR-kód beolvasása') => (c
 export async function scanCodes({ title = 'Kód beolvasása', hint = 'Tartsd a QR-kódot a keretbe.', onCode, keepOpen = false }) {
   if (!canScan()) return toast('Ezen a készüléken / böngészőben nem érhető el a kamera.', 'error');
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); }
-  catch { return toast('A kamera nem érhető el. Engedélyezd a kamerát a böngészőben az oldalhoz.', 'error', 6000); }
+  // Nagyobb felbontás kell: az alapértelmezett (640×480) mellett a kis QR-kód nem olvasható ki
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  catch {
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); }
+    catch { return toast('A kamera nem érhető el. Engedélyezd a kamerát a böngészőben az oldalhoz.', 'error', 6000); }
+  }
+  // Folyamatos élességállítás és enyhe nagyítás (ahol a készülék / böngésző támogatja); hiba esetén marad az alapbeállítás
+  const track = stream.getVideoTracks()[0];
+  const caps = (() => { try { return track.getCapabilities?.() || {}; } catch { return {}; } })();
+  const setFocus = async mode => { try { if (caps.focusMode?.includes(mode)) await track.applyConstraints({ advanced: [{ focusMode: mode }] }); } catch { /* nem támogatott */ } };
+  setFocus('continuous');
+  if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+    try { await track.applyConstraints({ advanced: [{ zoom: Math.min(caps.zoom.max, Math.max(caps.zoom.min, 1.5)) }] }); } catch { /* nem támogatott */ }
+  }
   const m = modal({
     title,
     body: html`<div class="scan"><video playsinline muted></video><div class="scan-frame" aria-hidden="true"></div></div>
@@ -90,6 +102,8 @@ export async function scanCodes({ title = 'Kód beolvasása', hint = 'Tartsd a Q
   m.done.then(() => { alive = false; stream.getTracks().forEach(t => t.stop()); });
   const video = m.el.querySelector('video');
   video.srcObject = stream;
+  // Koppintás a képre: az élességállítás újraindítása
+  video.addEventListener('click', async () => { await setFocus('single-shot'); setTimeout(() => setFocus('continuous'), 1500); });
   try { await video.play(); } catch { /* némított videó: a legtöbb böngésző engedi */ }
   let detector = null;
   if ('BarcodeDetector' in window) {
@@ -105,7 +119,7 @@ export async function scanCodes({ title = 'Kód beolvasása', hint = 'Tartsd a Q
   const read = async () => {
     if (video.readyState < 2) return null;
     if (detector) return (await detector.detect(video))[0]?.rawValue || null;
-    const w = video.videoWidth, h = video.videoHeight, s = Math.min(1, 720 / Math.max(w, h));
+    const w = video.videoWidth, h = video.videoHeight, s = Math.min(1, 1280 / Math.max(w, h));
     cv.width = Math.round(w * s); cv.height = Math.round(h * s);
     ctx.drawImage(video, 0, 0, cv.width, cv.height);
     return window.jsQR(ctx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height, { inversionAttempts: 'dontInvert' })?.data || null;
