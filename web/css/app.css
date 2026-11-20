@@ -107,7 +107,8 @@
 .filter-btn.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
 .filter-n { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--on-primary); font-size: .7rem; line-height: 18px; text-align: center; }
 @media (max-width: 699px) {
-  .toolbar:has(> .filter-btn) > .search-wrap, .toolbar:has(> .filter-btn) > input[type=search] { flex: 1 1 0; }
+  .toolbar:has(> .filter-btn) > .search-wrap, .toolbar:has(> .filter-btn) > input[type=search],
+  .toolbar:has(> [data-fslot]) > .search-wrap { flex: 1 1 0; }
 }
 
 .card-note { margin: 0; padding: .65rem 1rem; border-bottom: 1px solid var(--border); }
